@@ -1,0 +1,162 @@
+"""
+Long-running daemon for tmux-agents.
+
+Holds all agent state in memory, listens on a Unix domain socket for hook
+events and status queries, and periodically polls the process tree + screen-
+scrapes panes to detect state changes that hooks miss.
+
+Protocol (one connection per request, line-based text):
+  - Hook event: client sends a JSON line → daemon responds "ok\n"
+  - Status query: client sends "status <pane_id>\n" → daemon responds with
+    the tmux format string (possibly empty) and closes
+
+Lifecycle:
+  - Lazy-started by the status bar client or manually via python3 -m tmux_agents_daemon
+  - Exits on SIGTERM or when no tmux server is running
+"""
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
+import os
+import signal
+import sys
+import time
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from tmux_agents.status import (
+    IDLE, WORKING, WAITING, ERROR, AgentStatus,
+    list_statuses, read_status, write_status,
+    set_unseen, clear_unseen, is_unseen,
+    set_error_flag, clear_error_flag, has_error_flag,
+    cleanup_stale, recreate_missing, STATUS_DIR,
+)
+from tmux_agents.process import get_agent_panes
+from tmux_agents.tmux import (
+    list_panes, pane_pids, focused_pane_id,
+    capture_pane_tail, list_sessions,
+)
+from tmux_agents.hook import handle_event
+
+from tmux_agents_daemon.state import DaemonState
+from tmux_agents_daemon.poll import run_poll
+from tmux_agents_daemon.status_format import format_status_output
+
+SOCK_DIR = Path.home() / ".tmux-agents"
+SOCK_PATH = SOCK_DIR / "daemon.sock"
+PID_FILE = SOCK_DIR / "daemon.pid"
+
+POLL_INTERVAL_IDLE = 30.0
+POLL_INTERVAL_ACTIVE = 5.0
+
+log = logging.getLogger("tmux-agents-daemon")
+
+
+async def handle_connection(
+    reader: asyncio.StreamReader,
+    writer: asyncio.StreamWriter,
+    state: DaemonState,
+) -> None:
+    try:
+        line = await asyncio.wait_for(reader.readline(), timeout=5.0)
+        if not line:
+            return
+        text = line.decode().strip()
+
+        if text.startswith("status "):
+            pane_id = text[7:].strip()
+            state.mark_seen(pane_id)
+            response = format_status_output(state, pane_id)
+            writer.write(response.encode() + b"\n")
+        elif text.startswith("{"):
+            try:
+                event = json.loads(text)
+                pane_id = event.pop("_pane_id", "")
+                if pane_id:
+                    state.apply_hook_event(event, pane_id)
+            except json.JSONDecodeError:
+                pass
+            writer.write(b"ok\n")
+        else:
+            writer.write(b"err unknown command\n")
+
+        await writer.drain()
+    except (asyncio.TimeoutError, ConnectionResetError, BrokenPipeError):
+        pass
+    finally:
+        writer.close()
+        try:
+            await writer.wait_closed()
+        except (ConnectionResetError, BrokenPipeError):
+            pass
+
+
+async def poll_loop(state: DaemonState, shutdown_event: asyncio.Event) -> None:
+    while not shutdown_event.is_set():
+        interval = POLL_INTERVAL_ACTIVE if state.any_working() else POLL_INTERVAL_IDLE
+        try:
+            await asyncio.wait_for(shutdown_event.wait(), timeout=interval)
+            break
+        except asyncio.TimeoutError:
+            pass
+
+        run_poll(state)
+
+        if not list_sessions():
+            log.info("No tmux server running, shutting down")
+            shutdown_event.set()
+            break
+
+
+async def run_daemon() -> None:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(message)s",
+        datefmt="%H:%M:%S",
+    )
+
+    SOCK_DIR.mkdir(parents=True, exist_ok=True)
+    if SOCK_PATH.exists():
+        SOCK_PATH.unlink()
+
+    state = DaemonState()
+    run_poll(state)
+
+    shutdown_event = asyncio.Event()
+    loop = asyncio.get_event_loop()
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        loop.add_signal_handler(sig, shutdown_event.set)
+
+    server = await asyncio.start_unix_server(
+        lambda r, w: handle_connection(r, w, state),
+        path=str(SOCK_PATH),
+    )
+    os.chmod(SOCK_PATH, 0o700)
+    PID_FILE.write_text(str(os.getpid()))
+    log.info("Daemon listening on %s (pid %d)", SOCK_PATH, os.getpid())
+
+    poll_task = asyncio.create_task(poll_loop(state, shutdown_event))
+
+    await shutdown_event.wait()
+    server.close()
+    await server.wait_closed()
+    poll_task.cancel()
+    try:
+        await poll_task
+    except asyncio.CancelledError:
+        pass
+
+    SOCK_PATH.unlink(missing_ok=True)
+    PID_FILE.unlink(missing_ok=True)
+    log.info("Daemon shut down")
+
+
+def main() -> None:
+    asyncio.run(run_daemon())
+
+
+if __name__ == "__main__":
+    main()
