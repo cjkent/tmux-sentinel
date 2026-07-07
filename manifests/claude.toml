@@ -1,0 +1,26 @@
+# Screen-scrape patterns for Claude Code
+#
+# Each [[rule]] matches against the last N lines of the pane's visible content.
+# Rules are evaluated in order; the first match wins.
+#
+# Fields:
+#   state    — the state to assign: "waiting" or "idle"
+#   pattern  — regex to search for in the captured text
+#   exclude  — optional regex; if this also matches, the rule is skipped
+
+[[rule]]
+state = "waiting"
+pattern = '''requires approval|\(f\) Approve all pending|Yes, single permission|Trust, always allow|No \(Tab to edit\)|Allow once|Allow always|Do you want to proceed\?|shift\+tab to approve'''
+
+[[rule]]
+state = "waiting"
+pattern = '''Enter to select .* Esc to cancel|Esc to cancel .* Tab to amend'''
+
+[[rule]]
+state = "idle"
+pattern = '''ask a question or describe a task'''
+
+[[rule]]
+state = "idle"
+pattern = '''shift\+tab to cycle|\? for shortcuts'''
+exclude = '''esc to interrupt'''

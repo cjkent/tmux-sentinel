@@ -6,55 +6,34 @@ but updates the in-memory DaemonState instead of writing files.
 """
 from __future__ import annotations
 
-import re
-
 from tmux_agents.status import IDLE, WORKING, WAITING
 from tmux_agents.process import get_agent_panes, get_agent_types, _get_process_tree
 from tmux_agents.tmux import list_panes, pane_pids, capture_pane_tail, focused_pane_id, _run_tmux
 from tmux_agents.hook import _get_git_branch
 
 from tmux_agents_daemon.state import DaemonState
+from tmux_agents_daemon.manifests import load_all_manifests, classify
 
-_IDLE_PATTERN = re.compile(r"ask a question or describe a task")
-_CC_WORKING_PATTERN = re.compile(r"esc to interrupt")
-_APPROVAL_PATTERN = re.compile(
-    r"requires approval"
-    r"|\(f\) Approve all pending"
-    r"|Yes, single permission"
-    r"|Trust, always allow"
-    r"|No \(Tab to edit\)"
-    r"|Allow once"
-    r"|Allow always"
-    r"|Do you want to proceed\?"
-    r"|shift\+tab to approve"
-)
-_CC_PROMPT_PATTERN = re.compile(r"shift\+tab to cycle|\? for shortcuts")
-_CC_QUESTION_PATTERN = re.compile(r"Enter to select .* Esc to cancel|Esc to cancel .* Tab to amend")
+_MANIFESTS = load_all_manifests()
 
 
-def _detect_pane_state(pane_id: str) -> str | None:
+def _detect_pane_state(pane_id: str, agent_type: str = "claude") -> str | None:
     """Screen-scrape a pane to detect its actual state."""
     tail = capture_pane_tail(pane_id, lines=10)
     if not tail:
         return None
-    if _APPROVAL_PATTERN.search(tail):
-        return WAITING
-    if _CC_QUESTION_PATTERN.search(tail):
-        return WAITING
-    if _IDLE_PATTERN.search(tail):
-        return IDLE
-    if _CC_PROMPT_PATTERN.search(tail) and not _CC_WORKING_PATTERN.search(tail):
-        return IDLE
-    return None
+    rules = _MANIFESTS.get(agent_type)
+    if not rules:
+        return None
+    return classify(tail, rules)
 
 
 _WINDOW_NAME_MAP = {"claude": "claude", "kiro": "kiro"}
 _RENAME_TRIGGERS = {"toolbox-exec"}
 
 
-def _fix_window_names(all_pane_pids: dict[str, str], panes: list, process_tree) -> None:
+def _fix_window_names(agent_types: dict[str, str], panes: list) -> None:
     """Rename windows stuck on 'toolbox-exec' (or similar) to the agent name."""
-    agent_types = get_agent_types(all_pane_pids, process_tree=process_tree)
     pane_windows = {p.pane_id: p.window_name for p in panes}
     for pane_id, agent_type in agent_types.items():
         window_name = pane_windows.get(pane_id, "")
@@ -78,7 +57,8 @@ def run_poll(state: DaemonState) -> None:
     panes = list_panes()
     pane_paths = {p.pane_id: p.pane_current_path for p in panes}
 
-    _fix_window_names(all_pane_pids, panes, process_tree)
+    agent_types = get_agent_types(all_pane_pids, process_tree=process_tree)
+    _fix_window_names(agent_types, panes)
 
     stale_panes = set(state.panes.keys()) - live_agent_panes
     for pane_id in stale_panes:
@@ -86,6 +66,7 @@ def run_poll(state: DaemonState) -> None:
 
     now = int(time.time())
     for pane_id in live_agent_panes:
+        agent_type = agent_types.get(pane_id, "claude")
         ps = state.get(pane_id)
         if ps is None:
             cwd = pane_paths.get(pane_id, "")
@@ -94,12 +75,12 @@ def run_poll(state: DaemonState) -> None:
             ps.cwd = cwd
             ps.git_branch = branch
             ps.timestamp = now
-            actual = _detect_pane_state(pane_id)
+            actual = _detect_pane_state(pane_id, agent_type)
             ps.status = actual if actual else IDLE
             continue
 
         if ps.status in (WORKING, WAITING):
-            actual = _detect_pane_state(pane_id)
+            actual = _detect_pane_state(pane_id, agent_type)
             if actual == WAITING:
                 ps.status = WAITING
             elif actual == IDLE:

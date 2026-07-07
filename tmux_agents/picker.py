@@ -96,7 +96,7 @@ def _build_rows(
                 # Screen-scrape working agents to detect approval prompts or stale state
                 if status.status == WORKING:
                     from tmux_agents_daemon.poll import _detect_pane_state
-                    actual = _detect_pane_state(p.pane_id)
+                    actual = _detect_pane_state(p.pane_id, at.get(p.pane_id, "claude"))
                     if actual is not None:
                         display_status = actual
                 icon = status_label(display_status)

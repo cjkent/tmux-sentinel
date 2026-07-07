@@ -1,0 +1,5 @@
+# Screen-scrape patterns for Kiro CLI
+
+[[rule]]
+state = "idle"
+pattern = '''ask a question or describe a task'''
