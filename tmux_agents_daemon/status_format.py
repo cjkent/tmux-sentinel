@@ -1,8 +1,8 @@
 """
 Format the tmux status bar output from daemon state.
 
-Produces the same output format as the existing statusbar.py: colored
-segments showing finished/approval/working counts for other windows.
+Produces colored segments showing unseen/waiting/working counts for
+other windows (the focused window is excluded — you can already see it).
 """
 from __future__ import annotations
 
@@ -33,7 +33,7 @@ def format_status_output(state: DaemonState, requesting_pane: str) -> str:
 
     parts = []
     if unseen_count > 0:
-        parts.append(f"#[bg=red,fg=white,bold] ● {unseen_count} finished ")
+        parts.append(f"#[bg=red,fg=white,bold] ● {unseen_count} unseen ")
     if permission_count > 0:
         parts.append(f"#[bg=magenta,fg=white,bold] ⚠ {permission_count} waiting ")
     if working_count > 0:

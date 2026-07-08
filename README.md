@@ -75,12 +75,13 @@ Elapsed time is shown only for working agents — it reflects time since the use
 
 ### Status Bar
 
-`tmux_agents/statusbar.py` runs via `#()` in tmux's `status-right`, polling every 2 seconds:
+`bin/status_client.sh` runs via `#()` in tmux's `status-right`, querying the daemon each poll:
 
-- `● N finished` (red background) — agents with unseen completed turns
+- `● N unseen` (red background) — agents with completed turns you haven't looked at yet
+- `⚠ N waiting` (magenta background) — agents waiting for you (approval or a question)
 - `⚙ N working` (blue background) — agents currently processing
 
-When you focus a pane, its unseen flag is cleared on the next poll.
+Counts reflect *other* windows only — the focused window is excluded, since you can already see it. When you focus a pane, its unseen flag is cleared.
 
 ### Bell Notifications
 

@@ -40,7 +40,7 @@ def test_focused_pane_excluded():
     print("  ✓ test_focused_pane_excluded")
 
 
-def test_unseen_finished():
+def test_unseen():
     state = DaemonState()
     state.apply_hook_event(
         {"hookEventName": "UserPromptSubmit", "cwd": "/tmp"},
@@ -51,9 +51,9 @@ def test_unseen_finished():
         pane_id="100",
     )
     result = format_status_output(state, "200")
-    assert "finished" in result
+    assert "unseen" in result
     assert "●" in result
-    print("  ✓ test_unseen_finished")
+    print("  ✓ test_unseen")
 
 
 def test_waiting_waiting():
@@ -73,7 +73,7 @@ def test_multiple_categories():
         {"hookEventName": "UserPromptSubmit", "cwd": "/tmp"},
         pane_id="100",
     )
-    # One finished+unseen
+    # One unseen (completed turn)
     state.apply_hook_event(
         {"hookEventName": "UserPromptSubmit", "cwd": "/tmp"},
         pane_id="101",
@@ -88,7 +88,7 @@ def test_multiple_categories():
 
     result = format_status_output(state, "200")
     assert "working" in result
-    assert "finished" in result
+    assert "unseen" in result
     assert "waiting" in result
     print("  ✓ test_multiple_categories")
 
@@ -97,7 +97,7 @@ if __name__ == "__main__":
     test_empty_state()
     test_working_in_other_pane()
     test_focused_pane_excluded()
-    test_unseen_finished()
+    test_unseen()
     test_waiting_waiting()
     test_multiple_categories()
     print("\nAll tests passed")

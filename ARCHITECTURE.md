@@ -154,8 +154,8 @@ Agent runs in tmux pane
 | Picker label | waiting | Purple |
 | Picker label | error | Red |
 | Picker unseen marker | ● | Red |
-| Status bar | finished (unseen) | Red background |
-| Status bar | approval | Purple background |
+| Status bar | unseen | Red background |
+| Status bar | waiting | Magenta background |
 | Status bar | working | Blue background |
 
 ## Testing
