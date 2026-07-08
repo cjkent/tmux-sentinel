@@ -21,11 +21,13 @@ state = "idle"
 pattern = '''ask a question or describe a task'''
 
 # Idle: the mode footer (shift+tab to cycle / ? for shortcuts) is visible, but
-# only if the agent isn't actively working. CC signals "working" via either the
-# "esc to interrupt" hint or a running spinner with an elapsed timer, e.g.
-# "✽ Working… (5m 7s · ↓ 5.8k tokens)". The token/elapsed line is the reliable
-# marker across footer variants and spinner verbs.
+# only if the agent isn't actively working. CC signals "working" with a running
+# spinner and an elapsed timer in parens — "✽ Working… (3s)", "(57s · ↓ 432
+# tokens)", "(5m 7s · …)" — or the older "esc to interrupt" hint. The parenthesised
+# elapsed timer (\(\d+[ms]) is the reliable marker: it's present for the whole
+# turn regardless of spinner verb or whether a token counter has appeared yet,
+# and never shows when idle.
 [[rule]]
 state = "idle"
 pattern = '''shift\+tab to cycle|\? for shortcuts'''
-exclude = '''esc to interrupt|·\s*[↑↓].*tokens'''
+exclude = '''esc to interrupt|\(\d+[hms]'''
