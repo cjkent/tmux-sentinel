@@ -20,7 +20,12 @@ pattern = '''Enter to select .* Esc to cancel|Esc to cancel .* Tab to amend'''
 state = "idle"
 pattern = '''ask a question or describe a task'''
 
+# Idle: the mode footer (shift+tab to cycle / ? for shortcuts) is visible, but
+# only if the agent isn't actively working. CC signals "working" via either the
+# "esc to interrupt" hint or a running spinner with an elapsed timer, e.g.
+# "✽ Working… (5m 7s · ↓ 5.8k tokens)". The token/elapsed line is the reliable
+# marker across footer variants and spinner verbs.
 [[rule]]
 state = "idle"
 pattern = '''shift\+tab to cycle|\? for shortcuts'''
-exclude = '''esc to interrupt'''
+exclude = '''esc to interrupt|·\s*[↑↓].*tokens'''
