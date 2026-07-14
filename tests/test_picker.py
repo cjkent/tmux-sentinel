@@ -97,6 +97,45 @@ def test_elapsed_only_for_working():
     assert rows[2][5] == ""
 
 
+def _rows_daemon(d, panes, daemon_state, cur_session="other", cur_window="99"):
+    import tmux_agents.picker as pm
+    orig = pm.list_sessions
+    pm.list_sessions = lambda: sorted({p.session for p in panes})
+    try:
+        return _build_rows(panes, cur_session, cur_window, status_dir=d, daemon_state=daemon_state)
+    finally:
+        pm.list_sessions = orig
+
+
+def test_daemon_state_fast_path():
+    # A pane present in daemon_state uses its status without a status file.
+    d = _setup()
+    ds = {"99990": {"status": WORKING, "cwd": "/srv/app", "git_branch": "dev",
+                    "timestamp": 1000, "unseen": False, "agent_type": "claude"}}
+    rows, _ = _rows_daemon(d, [_make_pane()], ds, "test", "0")
+    assert "[WRK]" in rows[1][2]
+    assert rows[1][5] != ""  # elapsed shown for working
+
+
+def test_daemon_state_prefers_status_file_cwd():
+    # When a status file exists, its cwd wins over the daemon's (agent cwd vs shell cwd).
+    d = _setup()
+    write_status("99990", WORKING, "/deep/agent/path", "main", 1000, status_dir=d)
+    ds = {"99990": {"status": WORKING, "cwd": "/shallow", "git_branch": "other",
+                    "timestamp": 1000, "unseen": False, "agent_type": "claude"}}
+    rows, _ = _rows_daemon(d, [_make_pane()], ds, "test", "0")
+    assert "/deep/agent/path" in rows[1][3]
+    assert "(main)" in rows[1][4]
+
+
+def test_daemon_state_unseen_marker():
+    d = _setup()
+    ds = {"99990": {"status": IDLE, "cwd": "/tmp", "git_branch": "",
+                    "timestamp": 1000, "unseen": True, "agent_type": "claude"}}
+    rows, _ = _rows_daemon(d, [_make_pane()], ds)
+    assert "●" in rows[1][2]
+
+
 if __name__ == "__main__":
     for name, func in sorted(globals().items()):
         if name.startswith("test_") and callable(func):

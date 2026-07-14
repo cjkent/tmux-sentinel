@@ -32,6 +32,7 @@ agent hook fires  → hook_client.py       → nc -U daemon.sock → daemon → 
 **Protocol (one connection per request, line-based text):**
 - Hook event: client sends a JSON line with `_pane_id` field → daemon responds `ok\n`
 - Status query: client sends `status <pane_id>\n` → daemon responds with tmux format string (possibly empty)
+- State dump: client sends `dump\n` → daemon responds with a JSON object keyed by pane_id, each value holding `status`, `cwd`, `git_branch`, `timestamp`, `unseen`, `agent_type`. Used by the picker (see below).
 
 ### Status Bar Client (`bin/status_client.sh`)
 
@@ -69,9 +70,27 @@ Ctrl+b a → tmux display-popup → picker.py → fzf → tmux switch-client/sel
 
 **Agent detection is based on status files, not process detection.** Only panes where the hook has fired (creating a status file) are shown as agents. This prevents false positives from processes that run kiro-cli non-interactively.
 
-For agents with `working` status, the picker screen-scrapes the pane to detect approval prompts or stale idle state.
+**Two build paths (`_generate_list`):**
+
+1. **Daemon fast path** (`_generate_list_from_daemon`) — used when the daemon answers a `dump` query. Per-pane status, unseen, and elapsed come straight from the daemon's in-memory state, so the picker skips the full `ps` process-tree walk and all per-pane `capture-pane` screen-scrapes. This is ~2x+ faster and the gap grows with the number of *working* panes (the direct path screen-scrapes each one serially). Roughly 2–3× on a dozen panes.
+2. **Direct fallback** (`_generate_list_direct`) — used when the daemon is unreachable. Reads status files, walks the process tree, and screen-scrapes working panes itself. This is the original behaviour and keeps the picker working with no daemon.
+
+Both paths converge on `_build_rows`, which takes an optional `daemon_state` dict; when a pane is present in it, the daemon-supplied values are used instead of re-deriving them.
 
 The display and the selection target are separated by a unit separator character (U+001F). fzf's `--with-nth=1` shows only the display part; the target (`session:window`) is extracted after selection.
+
+**Known issue — the `cwd` (and its git branch) shown in the picker can be wrong.** There are two distinct notions of "current directory" for an agent pane, and they can disagree:
+
+- **The shell's cwd** — `pane_current_path` from tmux, i.e. the directory the pane's shell is in.
+- **The agent's reported cwd** — the `cwd` field the agent (Claude Code / Kiro) sends in its hook payload, i.e. where the agent believes it is operating. This is usually the more useful value and is what the picker prefers to show.
+
+The two differ whenever the agent operates in a subdirectory of the shell's cwd (common with Brazil workspaces: shell in the workspace root, agent working inside `src/SomePackage`). Concretely, cwd can be shown incorrectly when:
+
+1. **A pane was discovered by the daemon's poll rather than via a `SessionStart` hook** (e.g. an agent already running when the daemon started, or after a daemon restart / laptop wake). The daemon can only see the shell's `pane_current_path` via `ps`/tmux — it never received the agent's reported cwd — so it stores the *shell* cwd. The picker mitigates this by preferring the status file's cwd (written by `hook.py`, which does have the agent's cwd) when a status file exists; only if there is no status file does it fall back to the daemon's shell-cwd.
+2. **No status file exists and the pane is daemon-only** — the picker shows the daemon's cwd, which is the shell cwd (see above), so it may be shallower than where the agent is actually working.
+3. **The agent `cd`s mid-session** — the reported cwd reflects the last hook event's `cwd`; if the agent changed directory without a subsequent hook firing, the displayed cwd (and branch) lag until the next event.
+
+The status bar is unaffected — it never displays cwd. This only surfaces in the picker's path/branch columns and is cosmetic (navigation still works, since selection targets `session:window`, not a path).
 
 ## Shared Modules (`tmux_agents/`)
 

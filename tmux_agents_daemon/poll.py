@@ -75,9 +75,12 @@ def run_poll(state: DaemonState) -> None:
             ps.cwd = cwd
             ps.git_branch = branch
             ps.timestamp = now
+            ps.agent_type = agent_type
             actual = _detect_pane_state(pane_id, agent_type)
             ps.status = actual if actual else IDLE
             continue
+
+        ps.agent_type = agent_type
 
         if ps.status in (WORKING, WAITING):
             actual = _detect_pane_state(pane_id, agent_type)

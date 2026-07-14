@@ -22,6 +22,7 @@ class PaneState:
     timestamp: int = 0
     has_error: bool = False
     unseen: bool = False
+    agent_type: str = "claude"
 
 
 class DaemonState:

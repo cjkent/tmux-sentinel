@@ -58,9 +58,15 @@ def _build_rows(
     status_dir: Path = None,
     agent_types: dict[str, str] = None,
     git_branches: dict[str, str] = None,
+    daemon_state: dict = None,
 ) -> tuple[list[list[str]], list[str]]:
     """
     Build display rows and corresponding targets for the picker.
+
+    If daemon_state is provided (a dict keyed by pane_id from the daemon's
+    'dump' command), agent panes use its already-computed status/unseen/branch,
+    avoiding per-pane capture-pane and status-file reads. Panes not in
+    daemon_state fall back to the status-file path.
 
     Returns:
         (rows, targets) where rows[i] is a list of column values and
@@ -70,6 +76,7 @@ def _build_rows(
     sd = status_dir or DEFAULT_DIR
     at = agent_types or {}
     gb = git_branches or {}
+    ds = daemon_state or {}
     home = os.path.expanduser("~")
     rows: list[list[str]] = []
     targets: list[str] = []
@@ -89,9 +96,27 @@ def _build_rows(
         targets.append(f"{session}:")
 
         for p in sessions[session]:
-            status = read_status(p.pane_id, status_dir=sd)
             agent_icon = _AGENT_ICONS.get(at.get(p.pane_id, ""), "  ")
-            if status:
+            is_current = (p.session == cur_session and p.window_index == cur_window)
+            daemon_pane = ds.get(p.pane_id)
+            if daemon_pane is not None:
+                # Fast path: daemon supplies status/unseen/timestamp (no capture-pane).
+                # For cwd/branch, prefer the status file when present: the hook writes
+                # the agent's own cwd, whereas the daemon falls back to the shell's cwd
+                # for panes it discovered by polling rather than via a SessionStart hook.
+                display_status = daemon_pane["status"]
+                icon = status_label(display_status)
+                unseen = daemon_pane.get("unseen", False)
+                icon_display = f"{icon} ●" if unseen else f"{icon}  "
+                el = elapsed(daemon_pane["timestamp"]) if display_status == WORKING else ""
+                file_status = read_status(p.pane_id, status_dir=sd)
+                if file_status:
+                    cwd = file_status.cwd or daemon_pane.get("cwd", "") or p.pane_current_path
+                    branch = f"({file_status.git_branch})" if file_status.git_branch else ""
+                else:
+                    cwd = daemon_pane.get("cwd", "") or p.pane_current_path
+                    branch = f"({daemon_pane['git_branch']})" if daemon_pane.get("git_branch") else ""
+            elif (status := read_status(p.pane_id, status_dir=sd)):
                 display_status = status.status
                 # Screen-scrape working agents to detect approval prompts or stale state
                 if status.status == WORKING:
@@ -102,7 +127,6 @@ def _build_rows(
                 icon = status_label(display_status)
                 unseen = is_unseen(p.pane_id, status_dir=sd)
                 # Agents detected as waiting for approval are "unseen" unless it's the current window
-                is_current = (p.session == cur_session and p.window_index == cur_window)
                 if display_status == WAITING and status.status == WORKING and not is_current:
                     unseen = True
                 icon_display = f"{icon} ●" if unseen else f"{icon}  "
@@ -155,7 +179,51 @@ def _colorize_line(line: str) -> str:
 
 
 def _generate_list() -> str:
-    """Generate the fzf input list."""
+    """Generate the fzf input list.
+
+    Fast path: if the daemon is running, use its in-memory state snapshot for
+    agent panes (no process-tree walk, no per-pane capture-pane). Fall back to
+    the direct file+ps path if the daemon is unavailable.
+    """
+    from tmux_agents_daemon.client import dump_state
+
+    daemon_state = dump_state()
+    if daemon_state is not None:
+        return _generate_list_from_daemon(daemon_state)
+    return _generate_list_direct()
+
+
+def _generate_list_from_daemon(daemon_state: dict) -> str:
+    """Build the list from the daemon's state snapshot (fast path)."""
+    from concurrent.futures import ThreadPoolExecutor
+    from tmux_agents.hook import _get_git_branch
+
+    panes = list_panes()
+    cur_sess = current_session()
+    cur_win = current_window_index()
+
+    # Agent types drive the icon column; the daemon reports type per pane.
+    agent_types = {pid: st.get("agent_type", "claude") for pid, st in daemon_state.items()}
+
+    # Only non-agent panes need a git lookup; the daemon supplies branch for
+    # agent panes (computed from the agent's own cwd). Lookups run in parallel.
+    with ThreadPoolExecutor() as ex:
+        git_futs = {
+            p.pane_id: ex.submit(_get_git_branch, p.pane_current_path)
+            for p in panes
+            if p.pane_id not in daemon_state and p.pane_current_path
+        }
+        git_branches = {pid: fut.result() for pid, fut in git_futs.items()}
+
+    rows, targets = _build_rows(
+        panes, cur_sess, cur_win,
+        agent_types=agent_types, git_branches=git_branches, daemon_state=daemon_state,
+    )
+    return _render(rows, targets)
+
+
+def _generate_list_direct() -> str:
+    """Build the list via direct file + ps inspection (daemon-unavailable fallback)."""
     from concurrent.futures import ThreadPoolExecutor
     from tmux_agents.process import _get_process_tree
     from tmux_agents.hook import _get_git_branch
@@ -184,9 +252,13 @@ def _generate_list() -> str:
     agent_types = get_agent_types(pp, process_tree=tree)
 
     rows, targets = _build_rows(panes, cur_sess, cur_win, agent_types=agent_types, git_branches=git_branches)
+    return _render(rows, targets)
+
+
+def _render(rows: list[list[str]], targets: list[str]) -> str:
+    """Align, colorize, and join rows into the fzf input string."""
     aligned = align_columns(rows)
     colorized = [_colorize_line(line) for line in aligned]
-
     sep = "\x1f"
     return "\n".join(f"{line}{sep}{target}" for line, target in zip(colorized, targets))
 

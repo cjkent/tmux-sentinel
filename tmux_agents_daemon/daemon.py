@@ -71,6 +71,20 @@ async def handle_connection(
             state.mark_seen(pane_id)
             response = format_status_output(state, pane_id)
             writer.write(response.encode() + b"\n")
+        elif text == "dump":
+            # Full per-pane state snapshot for the picker (JSON object keyed by pane_id)
+            snapshot = {
+                pane_id: {
+                    "status": ps.status,
+                    "cwd": ps.cwd,
+                    "git_branch": ps.git_branch,
+                    "timestamp": ps.timestamp,
+                    "unseen": ps.unseen,
+                    "agent_type": ps.agent_type,
+                }
+                for pane_id, ps in state.panes.items()
+            }
+            writer.write(json.dumps(snapshot).encode() + b"\n")
         elif text.startswith("{"):
             try:
                 event = json.loads(text)
