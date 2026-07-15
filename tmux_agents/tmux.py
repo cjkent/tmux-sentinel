@@ -73,6 +73,15 @@ def current_window_index() -> str:
     return _run_tmux("display-message", "-p", "#{window_index}")
 
 
+def current_session_window() -> tuple[str, str]:
+    """Return (session_name, window_index) for the client, in one tmux call."""
+    output = _run_tmux("display-message", "-p", "#{session_name}|#{window_index}")
+    if "|" in output:
+        session, _, window = output.partition("|")
+        return session, window
+    return output, ""
+
+
 def switch_to(session: str, window: str) -> None:
     """Switch the client to the given session and window."""
     _run_tmux("switch-client", "-t", session)

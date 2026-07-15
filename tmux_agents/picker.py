@@ -59,6 +59,7 @@ def _build_rows(
     agent_types: dict[str, str] = None,
     git_branches: dict[str, str] = None,
     daemon_state: dict = None,
+    session_order: list[str] = None,
 ) -> tuple[list[list[str]], list[str]]:
     """
     Build display rows and corresponding targets for the picker.
@@ -67,6 +68,9 @@ def _build_rows(
     'dump' command), agent panes use its already-computed status/unseen/branch,
     avoiding per-pane capture-pane and status-file reads. Panes not in
     daemon_state fall back to the status-file path.
+
+    session_order gives the display order of sessions; if omitted it is fetched
+    via list_sessions() (callers that already have it can pass it to save a call).
 
     Returns:
         (rows, targets) where rows[i] is a list of column values and
@@ -87,7 +91,8 @@ def _build_rows(
         sessions.setdefault(p.session, []).append(p)
 
     # Use session order from tmux
-    session_order = list_sessions()
+    if session_order is None:
+        session_order = list_sessions()
     for session in session_order:
         if session not in sessions:
             continue
@@ -197,27 +202,35 @@ def _generate_list_from_daemon(daemon_state: dict) -> str:
     """Build the list from the daemon's state snapshot (fast path)."""
     from concurrent.futures import ThreadPoolExecutor
     from tmux_agents.hook import _get_git_branch
+    from tmux_agents.tmux import current_session_window
 
-    panes = list_panes()
-    cur_sess = current_session()
-    cur_win = current_window_index()
-
-    # Agent types drive the icon column; the daemon reports type per pane.
-    agent_types = {pid: st.get("agent_type", "claude") for pid, st in daemon_state.items()}
-
-    # Only non-agent panes need a git lookup; the daemon supplies branch for
-    # agent panes (computed from the agent's own cwd). Lookups run in parallel.
+    # The three independent tmux queries and (once panes are known) the git
+    # lookups all shell out; run them concurrently so their latencies overlap.
     with ThreadPoolExecutor() as ex:
+        panes_fut = ex.submit(list_panes)
+        sessions_fut = ex.submit(list_sessions)
+        cur_fut = ex.submit(current_session_window)
+
+        panes = panes_fut.result()
+
+        # Only non-agent panes need a git lookup; the daemon supplies branch for
+        # agent panes (computed from the agent's own cwd).
         git_futs = {
             p.pane_id: ex.submit(_get_git_branch, p.pane_current_path)
             for p in panes
             if p.pane_id not in daemon_state and p.pane_current_path
         }
+        cur_sess, cur_win = cur_fut.result()
+        session_order = sessions_fut.result()
         git_branches = {pid: fut.result() for pid, fut in git_futs.items()}
+
+    # Agent types drive the icon column; the daemon reports type per pane.
+    agent_types = {pid: st.get("agent_type", "claude") for pid, st in daemon_state.items()}
 
     rows, targets = _build_rows(
         panes, cur_sess, cur_win,
         agent_types=agent_types, git_branches=git_branches, daemon_state=daemon_state,
+        session_order=session_order,
     )
     return _render(rows, targets)
 
