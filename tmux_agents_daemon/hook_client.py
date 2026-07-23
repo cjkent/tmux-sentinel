@@ -6,7 +6,7 @@ and disconnects. If the daemon isn't running, exits silently — the daemon
 reconstructs state from the process tree on its own.
 
 Usage:
-    python3 -m tmux_agents_daemon.hook_client
+    python3 -S -m tmux_agents_daemon.hook_client
 """
 from __future__ import annotations
 

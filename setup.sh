@@ -29,7 +29,7 @@ error() { echo -e "${RED}✗${NC} $1"; }
 step()  { echo -e "\n${BOLD}$1${NC}"; }
 
 REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
-HOOK_CMD="PYTHONPATH=$REPO_DIR python3 $REPO_DIR/tmux_agents/hook.py"
+HOOK_CMD="PYTHONPATH=$REPO_DIR python3 -S $REPO_DIR/tmux_agents/hook.py"
 AGENTS_DIR="$HOME/.kiro/agents"
 STATUS_DIR="$HOME/.tmux-agents/status"
 
@@ -300,7 +300,7 @@ tmux set -g status-interval 5 2>/dev/null && info "status-interval 5s" || warn "
 # The #() syntax tells tmux to execute the command and insert its output.
 tmux set -g status-right "#($REPO_DIR/bin/status_client.sh '#{pane_id}') %H:%M" 2>/dev/null && info "status-right configured" || warn "Could not set status-right"
 # Bind Ctrl+b a to open the agent picker popup
-tmux bind-key a display-popup -w 70% -h 50% -E "PYTHONPATH=$REPO_DIR python3 $REPO_DIR/tmux_agents/picker.py" 2>/dev/null && info "Ctrl+b a bound to agent picker" || warn "Could not bind key"
+tmux bind-key a display-popup -w 70% -h 50% -E "PYTHONPATH=$REPO_DIR python3 -S $REPO_DIR/tmux_agents/picker.py" 2>/dev/null && info "Ctrl+b a bound to agent picker" || warn "Could not bind key"
 
 step "Setup complete!"
 echo ""

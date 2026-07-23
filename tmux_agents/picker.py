@@ -298,8 +298,11 @@ def main() -> None:
     fzf_input = _generate_list()
     sep = "\x1f"
 
-    # Build the reload and close commands for fzf
-    script = f"PYTHONPATH={os.environ.get('PYTHONPATH', '.')} python3 {__file__}"
+    # Build the reload and close commands for fzf.
+    # -S skips Python's site-init (no pip deps here, so it's safe) — trims a
+    # few ms of interpreter startup per invocation by skipping Homebrew's
+    # sitecustomize.py.
+    script = f"PYTHONPATH={os.environ.get('PYTHONPATH', '.')} python3 -S {__file__}"
     close_cmd = f"{script} --close {{2}}"
     reload_cmd = f"{script} --list"
 
