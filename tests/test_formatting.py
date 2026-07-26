@@ -1,7 +1,7 @@
-"""Tests for tmux_agents.formatting module."""
+"""Tests for tmux_sentinel.formatting module."""
 import time
 
-from tmux_agents.formatting import (
+from tmux_sentinel.formatting import (
     elapsed, status_label, colorize_status, align_columns,
     GREEN, BLUE, PURPLE, RED, RESET,
 )

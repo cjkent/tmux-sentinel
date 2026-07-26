@@ -12,7 +12,7 @@ import json
 import socket
 from pathlib import Path
 
-SOCK_PATH = Path.home() / ".tmux-agents" / "daemon.sock"
+SOCK_PATH = Path.home() / ".tmux-sentinel" / "daemon.sock"
 
 
 def dump_state(timeout: float = 1.0) -> dict | None:

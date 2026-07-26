@@ -1,9 +1,9 @@
-"""Tests for tmux_agents.status module."""
+"""Tests for tmux_sentinel.status module."""
 import json
 import tempfile
 from pathlib import Path
 
-from tmux_agents.status import (
+from tmux_sentinel.status import (
     IDLE, WORKING, WAITING, ERROR,
     write_status, read_status, list_statuses,
     set_error_flag, clear_error_flag, has_error_flag,

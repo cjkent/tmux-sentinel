@@ -6,13 +6,13 @@ but updates the in-memory DaemonState instead of writing files.
 """
 from __future__ import annotations
 
-from tmux_agents.status import IDLE, WORKING, WAITING
-from tmux_agents.process import get_agent_panes, get_agent_types, _get_process_tree
-from tmux_agents.tmux import list_panes, pane_pids, capture_pane_tail, focused_pane_id, _run_tmux
-from tmux_agents.hook import _get_git_branch
+from tmux_sentinel.status import IDLE, WORKING, WAITING
+from tmux_sentinel.process import get_agent_panes, get_agent_types, _get_process_tree
+from tmux_sentinel.tmux import list_panes, pane_pids, capture_pane_tail, focused_pane_id, _run_tmux
+from tmux_sentinel.hook import _get_git_branch
 
-from tmux_agents_daemon.state import DaemonState
-from tmux_agents_daemon.manifests import load_all_manifests, classify
+from tmux_sentinel_daemon.state import DaemonState
+from tmux_sentinel_daemon.manifests import load_all_manifests, classify
 
 _MANIFESTS = load_all_manifests()
 

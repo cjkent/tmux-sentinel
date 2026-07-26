@@ -1,11 +1,11 @@
 #!/bin/bash
-# Status bar client for tmux-agents daemon.
+# Status bar client for tmux-sentinel daemon.
 # Queries the daemon for status output; lazy-starts it if not running.
 #
 # Usage in tmux.conf:
-#   set -g status-right '#(~/.tmux-agents/bin/status_client.sh "#{pane_id}") %H:%M'
+#   set -g status-right '#(~/.tmux-sentinel/bin/status_client.sh "#{pane_id}") %H:%M'
 
-SOCK="$HOME/.tmux-agents/daemon.sock"
+SOCK="$HOME/.tmux-sentinel/daemon.sock"
 REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 PANE_ID="${1#%}"
 
@@ -16,7 +16,7 @@ fi
 RESULT=$(echo "status $PANE_ID" | nc -U "$SOCK" 2>/dev/null)
 
 if [ $? -ne 0 ] || [ -z "$RESULT" ] && [ ! -S "$SOCK" ]; then
-    PYTHONPATH="$REPO_DIR" python3 -S -m tmux_agents_daemon </dev/null >/dev/null 2>&1 &
+    PYTHONPATH="$REPO_DIR" python3 -S -m tmux_sentinel_daemon </dev/null >/dev/null 2>&1 &
     sleep 0.3
     RESULT=$(echo "status $PANE_ID" | nc -U "$SOCK" 2>/dev/null)
 fi

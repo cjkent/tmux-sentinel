@@ -1,4 +1,4 @@
-# tmux-agents Build Status
+# tmux-sentinel Build Status
 
 ## P0 Deliverables
 
@@ -22,4 +22,4 @@ _(newest first)_
 - **#7 Setup script** — Interactive TUI checkbox picker for agent selection. Injects hooks, configures tmux (bell, status bar, keybinding). Supports --remove-hooks. 16 tests.
 - **#5+#6 Status bar + stale cleanup** — Polling script for status-right shows cross-session summary with color-coded backgrounds. Stale cleanup built into both picker and status-bar (validate-on-read). 17 tests.
 - **#3+#4 Picker + bell** — fzf popup with session grouping, column alignment, Ctrl+b a. Bell rings on stop. 12 tests.
-- **#1+#2 Hook script + status files** — `hooks/notify.sh` handles all 5 events, writes JSON to `~/.tmux-agents/status/<pane-id>.json`. Fixed jq boolean false handling. 13 tests.
+- **#1+#2 Hook script + status files** — `hooks/notify.sh` handles all 5 events, writes JSON to `~/.tmux-sentinel/status/<pane-id>.json`. Fixed jq boolean false handling. 13 tests.

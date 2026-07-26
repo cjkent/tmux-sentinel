@@ -1,10 +1,10 @@
-"""Tests for tmux_agents.picker module."""
+"""Tests for tmux_sentinel.picker module."""
 import tempfile
 from pathlib import Path
 
-from tmux_agents.status import IDLE, WORKING, WAITING, write_status, set_unseen
-from tmux_agents.tmux import PaneInfo
-from tmux_agents.picker import (
+from tmux_sentinel.status import IDLE, WORKING, WAITING, write_status, set_unseen
+from tmux_sentinel.tmux import PaneInfo
+from tmux_sentinel.picker import (
     _build_rows, _colorize_line, _display_name,
     _shorten_path, _home_symlink_targets,
 )
@@ -25,7 +25,7 @@ def _setup():
 
 
 def _rows(d, panes, cur_session="other", cur_window="99"):
-    import tmux_agents.picker as pm
+    import tmux_sentinel.picker as pm
     orig = pm.list_sessions
     pm.list_sessions = lambda: sorted({p.session for p in panes})
     try:
@@ -102,7 +102,7 @@ def test_elapsed_only_for_working():
 
 
 def _rows_daemon(d, panes, daemon_state, cur_session="other", cur_window="99"):
-    import tmux_agents.picker as pm
+    import tmux_sentinel.picker as pm
     orig = pm.list_sessions
     pm.list_sessions = lambda: sorted({p.session for p in panes})
     try:
@@ -147,7 +147,7 @@ def test_generate_list_from_daemon_calls_cleanup_stale():
     # badge). _generate_list_from_daemon must clear stale files using the
     # daemon's own pane set as the liveness truth (it has no ps walk of its
     # own to derive one).
-    import tmux_agents.picker as pm
+    import tmux_sentinel.picker as pm
 
     pane = _make_pane()
     calls = []
@@ -206,7 +206,7 @@ def test_display_name_works_for_kiro_too():
 
 
 def test_shorten_path_home_prefix():
-    assert _shorten_path("/Users/cjkent/dev/tmux-agents", "/Users/cjkent", {}) == "~/dev/tmux-agents"
+    assert _shorten_path("/Users/cjkent/dev/tmux-sentinel", "/Users/cjkent", {}) == "~/dev/tmux-sentinel"
 
 
 def test_shorten_path_home_symlink():

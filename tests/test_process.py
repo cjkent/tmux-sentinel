@@ -1,5 +1,5 @@
-"""Tests for tmux_agents.process module."""
-from tmux_agents.process import get_kiro_panes, _has_kiro_descendant, get_agent_panes, _has_agent_descendant, _is_agent_process
+"""Tests for tmux_sentinel.process module."""
+from tmux_sentinel.process import get_kiro_panes, _has_kiro_descendant, get_agent_panes, _has_agent_descendant, _is_agent_process
 
 
 def _make_tree(*entries):

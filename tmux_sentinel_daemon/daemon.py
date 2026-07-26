@@ -1,5 +1,5 @@
 """
-Long-running daemon for tmux-agents.
+Long-running daemon for tmux-sentinel.
 
 Holds all agent state in memory, listens on a Unix domain socket for hook
 events and status queries, and periodically polls the process tree + screen-
@@ -11,7 +11,7 @@ Protocol (one connection per request, line-based text):
     the tmux format string (possibly empty) and closes
 
 Lifecycle:
-  - Lazy-started by the status bar client or manually via python3 -m tmux_agents_daemon
+  - Lazy-started by the status bar client or manually via python3 -m tmux_sentinel_daemon
   - Exits on SIGTERM or when no tmux server is running
 """
 from __future__ import annotations
@@ -27,32 +27,32 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from tmux_agents.status import (
+from tmux_sentinel.status import (
     IDLE, WORKING, WAITING, ERROR, AgentStatus,
     list_statuses, read_status, write_status,
     set_unseen, clear_unseen, is_unseen,
     set_error_flag, clear_error_flag, has_error_flag,
     cleanup_stale, recreate_missing, STATUS_DIR,
 )
-from tmux_agents.process import get_agent_panes
-from tmux_agents.tmux import (
+from tmux_sentinel.process import get_agent_panes
+from tmux_sentinel.tmux import (
     list_panes, pane_pids, focused_pane_id,
     capture_pane_tail, list_sessions,
 )
-from tmux_agents.hook import handle_event
+from tmux_sentinel.hook import handle_event
 
-from tmux_agents_daemon.state import DaemonState
-from tmux_agents_daemon.poll import run_poll
-from tmux_agents_daemon.status_format import format_status_output
+from tmux_sentinel_daemon.state import DaemonState
+from tmux_sentinel_daemon.poll import run_poll
+from tmux_sentinel_daemon.status_format import format_status_output
 
-SOCK_DIR = Path.home() / ".tmux-agents"
+SOCK_DIR = Path.home() / ".tmux-sentinel"
 SOCK_PATH = SOCK_DIR / "daemon.sock"
 PID_FILE = SOCK_DIR / "daemon.pid"
 
 POLL_INTERVAL_IDLE = 30.0
 POLL_INTERVAL_ACTIVE = 5.0
 
-log = logging.getLogger("tmux-agents-daemon")
+log = logging.getLogger("tmux-sentinel-daemon")
 
 
 async def handle_connection(

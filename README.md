@@ -1,10 +1,10 @@
-# tmux-agents
+# tmux-sentinel
 
 A tmux-native tool for monitoring and switching between multiple AI agent sessions. It tracks agent status via lifecycle hooks (Kiro CLI and Claude Code) and surfaces that information through a window picker, status bar, and bell notifications — all within tmux.
 
 ## What It Does
 
-When you run multiple AI agents (Kiro CLI or Claude Code) in separate tmux windows, tmux-agents gives you:
+When you run multiple AI agents (Kiro CLI or Claude Code) in separate tmux windows, tmux-sentinel gives you:
 
 - **Status tracking** — know which agents are working, idle, waiting for input, or errored, without switching to each window
 - **Window picker** (`Ctrl+b a`) — an fzf popup listing all windows across all sessions with agent status, working directory, git branch, and elapsed time
@@ -15,7 +15,7 @@ When you run multiple AI agents (Kiro CLI or Claude Code) in separate tmux windo
 
 ### Hook Script
 
-`tmux_agents/hook.py` handles lifecycle events from both Kiro CLI and Claude Code. It receives a JSON payload on stdin and dispatches based on event name:
+`tmux_sentinel/hook.py` handles lifecycle events from both Kiro CLI and Claude Code. It receives a JSON payload on stdin and dispatches based on event name:
 
 | Kiro CLI Event | Claude Code Event | Action |
 |---|---|---|
@@ -32,7 +32,7 @@ The final status on `stop` is determined by:
 
 ### Status Files
 
-Each agent pane gets a JSON file at `~/.tmux-agents/status/<pane-id>.json`:
+Each agent pane gets a JSON file at `~/.tmux-sentinel/status/<pane-id>.json`:
 
 ```json
 {
@@ -59,7 +59,7 @@ Process detection uses a single `ps` snapshot + BFS tree walk from each pane's s
 
 ### Window Picker
 
-`tmux_agents/picker.py` is an fzf popup bound to `Ctrl+b a`. It:
+`tmux_sentinel/picker.py` is an fzf popup bound to `Ctrl+b a`. It:
 
 1. Cleans up stale status files
 2. Lists all windows across all tmux sessions
@@ -98,7 +98,7 @@ Prerequisites: Python 3.8+, `jq`, `fzf`, `tmux`.
 The setup script:
 
 1. Checks that dependencies are installed
-2. Creates `~/.tmux-agents/status/`
+2. Creates `~/.tmux-sentinel/status/`
 3. Presents an interactive checkbox picker of your Kiro agent configs (`~/.kiro/agents/*.json`)
 4. Backs up the selected configs and injects hook entries for all 5 lifecycle events
 5. Removes any old bash hooks if present
@@ -116,8 +116,8 @@ Note: tmux options set by setup don't persist across tmux restarts. Add them to 
 ## File Structure
 
 ```
-tmux-agents/
-├── tmux_agents/               # Python package (active)
+tmux-sentinel/
+├── tmux_sentinel/               # Python package (active)
 │   ├── __init__.py
 │   ├── status.py              # Status file I/O, flags, cleanup
 │   ├── process.py             # Agent process detection via ps tree walk

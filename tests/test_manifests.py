@@ -5,7 +5,7 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from tmux_agents_daemon.manifests import load_all_manifests, classify
+from tmux_sentinel_daemon.manifests import load_all_manifests, classify
 
 _RULES = load_all_manifests()["claude"]
 

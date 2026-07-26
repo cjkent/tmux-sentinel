@@ -10,8 +10,8 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass, field
 
-from tmux_agents.status import IDLE, WORKING, WAITING, ERROR, AgentStatus, clear_unseen
-from tmux_agents.hook import _get_git_branch
+from tmux_sentinel.status import IDLE, WORKING, WAITING, ERROR, AgentStatus, clear_unseen
+from tmux_sentinel.hook import _get_git_branch
 
 
 @dataclass

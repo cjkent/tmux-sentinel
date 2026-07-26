@@ -16,4 +16,4 @@
 
 ## Done
 
-- **TOML screen manifests** — Screen-scrape patterns now live in `manifests/*.toml` (one per agent), loaded by `tmux_agents_daemon/manifests.py`. Adding an agent or updating a pattern is now a config change. Inspired by herdr.
+- **TOML screen manifests** — Screen-scrape patterns now live in `manifests/*.toml` (one per agent), loaded by `tmux_sentinel_daemon/manifests.py`. Adding an agent or updating a pattern is now a config change. Inspired by herdr.

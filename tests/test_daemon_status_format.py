@@ -5,9 +5,9 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from tmux_agents_daemon.state import DaemonState
-from tmux_agents_daemon.status_format import format_status_output
-from tmux_agents.status import IDLE, WORKING, WAITING
+from tmux_sentinel_daemon.state import DaemonState
+from tmux_sentinel_daemon.status_format import format_status_output
+from tmux_sentinel.status import IDLE, WORKING, WAITING
 
 
 def test_empty_state():

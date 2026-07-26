@@ -2,13 +2,13 @@
 
 ## Overview
 
-tmux-agents monitors AI agent sessions (Kiro CLI and Claude Code) running in tmux panes. It consists of two Python packages (`tmux_agents/` and `tmux_agents_daemon/`) plus a shell script. No pip dependencies — everything uses the Python standard library. The only external tools are `tmux`, `fzf`, `nc` (netcat), and `jq` (jq is only used by `setup.sh`, not by Python code).
+tmux-sentinel monitors AI agent sessions (Kiro CLI and Claude Code) running in tmux panes. It consists of two Python packages (`tmux_sentinel/` and `tmux_sentinel_daemon/`) plus a shell script. No pip dependencies — everything uses the Python standard library. The only external tools are `tmux`, `fzf`, `nc` (netcat), and `jq` (jq is only used by `setup.sh`, not by Python code).
 
 ## Components
 
-### Daemon (`tmux_agents_daemon/`)
+### Daemon (`tmux_sentinel_daemon/`)
 
-A long-running asyncio process that holds all agent state in memory and serves it over a Unix domain socket at `~/.tmux-agents/daemon.sock`.
+A long-running asyncio process that holds all agent state in memory and serves it over a Unix domain socket at `~/.tmux-sentinel/daemon.sock`.
 
 ```
 tmux status-right → bin/status_client.sh → nc -U daemon.sock → daemon → response
@@ -24,9 +24,9 @@ agent hook fires  → hook_client.py       → nc -U daemon.sock → daemon → 
 - `hook_client.py` — fire-and-forget socket client for sending hook events to the daemon
 
 **Lifecycle:**
-- Lazy-started by `bin/status_client.sh` on first tmux poll (or manually via `python3 -m tmux_agents_daemon`)
+- Lazy-started by `bin/status_client.sh` on first tmux poll (or manually via `python3 -m tmux_sentinel_daemon`)
 - Exits on SIGTERM or when no tmux server is running (checked periodically)
-- PID file at `~/.tmux-agents/daemon.pid`
+- PID file at `~/.tmux-sentinel/daemon.pid`
 - If it crashes, the status client gets no response and restarts it on the next poll
 
 **Protocol (one connection per request, line-based text):**
@@ -46,8 +46,8 @@ set -g status-right "#(bin/status_client.sh '#{pane_id}') %H:%M"
 
 Two parallel hooks fire on each agent lifecycle event:
 
-1. `tmux_agents/hook.py` — writes status JSON to `~/.tmux-agents/status/<pane-id>.json` (used by the picker)
-2. `tmux_agents_daemon/hook_client.py` — sends the event to the daemon socket (used by the status bar)
+1. `tmux_sentinel/hook.py` — writes status JSON to `~/.tmux-sentinel/status/<pane-id>.json` (used by the picker)
+2. `tmux_sentinel_daemon/hook_client.py` — sends the event to the daemon socket (used by the status bar)
 
 Both are configured in `~/.claude/settings.json` (Claude Code) and `~/.kiro/agents/*.json` (Kiro CLI).
 
@@ -60,7 +60,7 @@ Five events are handled:
 
 **Known limitation:** Kiro CLI has no hook for cancellation or tool approval prompts. If the user cancels mid-turn or the agent is waiting for tool approval, the `stop` hook never fires and status stays as `working`. This is corrected by screen-scrape detection in the daemon's poll loop.
 
-### Picker (`tmux_agents/picker.py`)
+### Picker (`tmux_sentinel/picker.py`)
 
 Called by tmux when the user presses `Ctrl+b a`. Runs inside a `display-popup` overlay.
 
@@ -92,7 +92,7 @@ The two differ whenever the agent operates in a subdirectory of the shell's cwd 
 
 The status bar is unaffected — it never displays cwd. This only surfaces in the picker's path/branch columns and is cosmetic (navigation still works, since selection targets `session:window`, not a path).
 
-## Shared Modules (`tmux_agents/`)
+## Shared Modules (`tmux_sentinel/`)
 
 ### status.py
 

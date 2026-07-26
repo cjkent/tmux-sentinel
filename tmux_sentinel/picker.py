@@ -1,5 +1,5 @@
 """
-Window picker for tmux-agents.
+Window picker for tmux-sentinel.
 
 An fzf-based popup showing all tmux windows across all sessions with agent
 status metadata. Bound to Ctrl+b a via setup.sh.
@@ -31,17 +31,17 @@ import subprocess
 import sys
 from pathlib import Path
 
-from tmux_agents.status import (
+from tmux_sentinel.status import (
     WORKING, WAITING, STATUS_DIR,
     read_status, is_unseen, cleanup_stale, recreate_missing,
 )
-from tmux_agents.hook import _get_git_branch
-from tmux_agents.process import get_kiro_panes, get_agent_types
-from tmux_agents.tmux import (
+from tmux_sentinel.hook import _get_git_branch
+from tmux_sentinel.process import get_kiro_panes, get_agent_types
+from tmux_sentinel.tmux import (
     list_panes, list_sessions, pane_pids,
     current_session, current_window_index, current_session_window, switch_to, PaneInfo,
 )
-from tmux_agents.formatting import (
+from tmux_sentinel.formatting import (
     elapsed, status_label, colorize_status, align_columns,
     RED, RESET,
 )
@@ -139,7 +139,7 @@ def _build_rows(
         (rows, targets) where rows[i] is a list of column values and
         targets[i] is "session:window" or "" for session headers.
     """
-    from tmux_agents.status import STATUS_DIR as DEFAULT_DIR
+    from tmux_sentinel.status import STATUS_DIR as DEFAULT_DIR
     sd = status_dir or DEFAULT_DIR
     at = agent_types or {}
     gb = git_branches or {}
@@ -189,7 +189,7 @@ def _build_rows(
                 display_status = status.status
                 # Screen-scrape working agents to detect approval prompts or stale state
                 if status.status == WORKING:
-                    from tmux_agents_daemon.poll import _detect_pane_state
+                    from tmux_sentinel_daemon.poll import _detect_pane_state
                     actual = _detect_pane_state(p.pane_id, at.get(p.pane_id, "claude"))
                     if actual is not None:
                         display_status = actual
@@ -231,7 +231,7 @@ _BOLD = "\033[1m"
 
 def _colorize_line(line: str) -> str:
     """Apply ANSI colors to status labels and unseen markers in a line."""
-    from tmux_agents.formatting import GREEN
+    from tmux_sentinel.formatting import GREEN
     is_current = "►" in line
     replacements = [
         ("►", f"{GREEN}►{RESET}"),
@@ -255,7 +255,7 @@ def _generate_list() -> str:
     agent panes (no process-tree walk, no per-pane capture-pane). Fall back to
     the direct file+ps path if the daemon is unavailable.
     """
-    from tmux_agents_daemon.client import dump_state
+    from tmux_sentinel_daemon.client import dump_state
 
     daemon_state = dump_state()
     if daemon_state is not None:
@@ -266,7 +266,7 @@ def _generate_list() -> str:
 def _generate_list_from_daemon(daemon_state: dict) -> str:
     """Build the list from the daemon's state snapshot (fast path)."""
     from concurrent.futures import ThreadPoolExecutor
-    from tmux_agents.hook import _get_git_branch
+    from tmux_sentinel.hook import _get_git_branch
 
     # The daemon's keys are exactly the panes it currently sees an agent
     # running in (populated via its own ps walk + hook events). Remove status
@@ -310,9 +310,9 @@ def _generate_list_from_daemon(daemon_state: dict) -> str:
 def _generate_list_direct() -> str:
     """Build the list via direct file + ps inspection (daemon-unavailable fallback)."""
     from concurrent.futures import ThreadPoolExecutor
-    from tmux_agents.process import _get_process_tree
-    from tmux_agents.hook import _get_git_branch
-    from tmux_agents.status import read_status
+    from tmux_sentinel.process import _get_process_tree
+    from tmux_sentinel.hook import _get_git_branch
+    from tmux_sentinel.status import read_status
 
     pp = pane_pids()
     panes = list_panes()

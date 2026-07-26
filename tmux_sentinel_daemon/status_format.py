@@ -6,9 +6,9 @@ other windows (the focused window is excluded — you can already see it).
 """
 from __future__ import annotations
 
-from tmux_agents.status import WORKING, WAITING
+from tmux_sentinel.status import WORKING, WAITING
 
-from tmux_agents_daemon.state import DaemonState
+from tmux_sentinel_daemon.state import DaemonState
 
 
 def format_status_output(state: DaemonState, requesting_pane: str) -> str:

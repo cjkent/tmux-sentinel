@@ -19,7 +19,7 @@ assert_eq() {
     fi
 }
 
-HOOK_CMD="PYTHONPATH=$SCRIPT_DIR python3 $SCRIPT_DIR/tmux_agents/hook.py"
+HOOK_CMD="PYTHONPATH=$SCRIPT_DIR python3 $SCRIPT_DIR/tmux_sentinel/hook.py"
 EVENTS="agentSpawn userPromptSubmit preToolUse postToolUse stop"
 
 # --- Test: inject hooks into a bare agent config ---
@@ -34,9 +34,9 @@ EOF
 
 jq_filter='. | if .hooks == null then .hooks = {} else . end'
 for evt in $EVENTS; do
-    jq_filter+=" | if .hooks.${evt} then .hooks.${evt} = [.hooks.${evt}[] | select(.command | test(\"tmux-agents/.*notify\\\\.sh\") | not)] else . end"
-    jq_filter+=" | if (.hooks.${evt} // [] | map(select(.command | test(\"tmux_agents.*hook\\\\.py\"))) | length) == 0"
-    jq_filter+=" then .hooks.${evt} = (.hooks.${evt} // []) + [{\"command\": \"${HOOK_CMD}\", \"description\": \"tmux-agents status tracking\"}]"
+    jq_filter+=" | if .hooks.${evt} then .hooks.${evt} = [.hooks.${evt}[] | select(.command | test(\"tmux-sentinel/.*notify\\\\.sh\") | not)] else . end"
+    jq_filter+=" | if (.hooks.${evt} // [] | map(select(.command | test(\"tmux_sentinel.*hook\\\\.py\"))) | length) == 0"
+    jq_filter+=" then .hooks.${evt} = (.hooks.${evt} // []) + [{\"command\": \"${HOOK_CMD}\", \"description\": \"tmux-sentinel status tracking\"}]"
     jq_filter+=" else . end"
 done
 result=$(jq "$jq_filter" "$TEST_DIR/test-agent.json") && echo "$result" > "$TEST_DIR/test-agent.json"

@@ -1,5 +1,5 @@
 """
-Hook entry point for tmux-agents.
+Hook entry point for tmux-sentinel.
 
 Reads a JSON event payload from stdin and updates the pane's status file.
 Supports both Kiro CLI (camelCase events) and Claude Code (PascalCase events).
@@ -8,7 +8,7 @@ Kiro CLI events: agentSpawn, userPromptSubmit, preToolUse, postToolUse, stop
 Claude Code events: SessionStart, UserPromptSubmit, PreToolUse, PostToolUse, Stop
 
 Usage (in agent config or Claude Code settings):
-    python3 -m tmux_agents.hook
+    python3 -m tmux_sentinel.hook
 
 Exit silently if not running inside a tmux pane ($TMUX_PANE unset).
 """
@@ -22,7 +22,7 @@ import sys
 import time
 from pathlib import Path
 
-from tmux_agents.status import (
+from tmux_sentinel.status import (
     IDLE, WORKING, WAITING, ERROR,
     write_status, read_status, set_error_flag, clear_error_flag,
     has_error_flag, set_unseen, ensure_status_dir,
@@ -59,7 +59,7 @@ def handle_event(event: dict, pane_id: str, status_dir: Path = None) -> None:
 
     Handles both Kiro CLI (camelCase) and Claude Code (PascalCase) event names.
     """
-    from tmux_agents.status import STATUS_DIR as DEFAULT_DIR
+    from tmux_sentinel.status import STATUS_DIR as DEFAULT_DIR
     sd = status_dir or DEFAULT_DIR
 
     event_name = event.get("hook_event_name") or event.get("hookEventName") or "unknown"

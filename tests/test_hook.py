@@ -1,12 +1,12 @@
-"""Tests for tmux_agents.hook module."""
+"""Tests for tmux_sentinel.hook module."""
 import tempfile
 from pathlib import Path
 
-from tmux_agents.status import (
+from tmux_sentinel.status import (
     IDLE, WORKING, WAITING, ERROR,
     read_status, has_error_flag, is_unseen,
 )
-from tmux_agents.hook import handle_event
+from tmux_sentinel.hook import handle_event
 
 _test_dir = None
 

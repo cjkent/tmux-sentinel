@@ -10,9 +10,9 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from tmux_agents_daemon.daemon import handle_connection
-from tmux_agents_daemon.state import DaemonState
-from tmux_agents.status import WORKING
+from tmux_sentinel_daemon.daemon import handle_connection
+from tmux_sentinel_daemon.state import DaemonState
+from tmux_sentinel.status import WORKING
 
 
 async def _run_server_with_request(state: DaemonState, request: bytes) -> bytes:

@@ -1,5 +1,5 @@
 """
-Process tree inspection for tmux-agents.
+Process tree inspection for tmux-sentinel.
 
 Detects which tmux panes have an interactive AI agent (Kiro CLI or Claude Code)
 running as a descendant process. Uses a single `ps -eo pid,ppid,args` call to

@@ -1,7 +1,7 @@
 """
-Status file management for tmux-agents.
+Status file management for tmux-sentinel.
 
-Each agent pane has a JSON status file at ~/.tmux-agents/status/<pane-id>.json
+Each agent pane has a JSON status file at ~/.tmux-sentinel/status/<pane-id>.json
 containing: status, cwd, git_branch, timestamp.
 
 Additional flag files:
@@ -22,7 +22,7 @@ WORKING = "working"
 WAITING = "waiting"
 ERROR = "error"
 
-STATUS_DIR = Path.home() / ".tmux-agents" / "status"
+STATUS_DIR = Path.home() / ".tmux-sentinel" / "status"
 
 
 @dataclass
@@ -153,7 +153,7 @@ def recreate_missing(
     tmux, so the picker and status bar show correct info immediately.
     """
     import time
-    from tmux_agents.hook import _get_git_branch
+    from tmux_sentinel.hook import _get_git_branch
 
     now = int(time.time())
     for pane_id in live_pane_ids:

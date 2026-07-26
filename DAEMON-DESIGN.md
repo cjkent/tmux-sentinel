@@ -6,11 +6,11 @@ The current architecture spawns a full Python process every 5 seconds for the st
 
 ## Solution
 
-A long-running Python daemon holds all state in memory. Hooks and the status bar communicate with it via a Unix domain socket at `~/.tmux-agents/daemon.sock`.
+A long-running Python daemon holds all state in memory. Hooks and the status bar communicate with it via a Unix domain socket at `~/.tmux-sentinel/daemon.sock`.
 
 ## Components
 
-### Daemon (`tmux_agents_daemon/daemon.py`)
+### Daemon (`tmux_sentinel_daemon/daemon.py`)
 
 Single async process (asyncio) that:
 
@@ -21,7 +21,7 @@ Single async process (asyncio) that:
 - Manages unseen/error flags in memory
 - Clears unseen for a pane when it sees that pane in a status query (replaces the "clear on visit" file logic)
 
-### Hook client (`tmux_agents_daemon/hook_client.py`)
+### Hook client (`tmux_sentinel_daemon/hook_client.py`)
 
 Connects to the socket, writes the JSON event, closes. If connection fails, exits silently. The daemon reconstructs state on its own, so dropped events are tolerable.
 
@@ -29,10 +29,10 @@ Connects to the socket, writes the JSON event, closes. If connection fails, exit
 
 ```bash
 #!/bin/bash
-SOCK=~/.tmux-agents/daemon.sock
+SOCK=~/.tmux-sentinel/daemon.sock
 RESULT=$(echo "$1" | nc -U "$SOCK" 2>/dev/null)
 if [ -z "$RESULT" ] && [ $? -ne 0 ]; then
-    PYTHONPATH=/path/to/repo python3 -m tmux_agents.daemon &
+    PYTHONPATH=/path/to/repo python3 -m tmux_sentinel.daemon &
     sleep 0.2
     RESULT=$(echo "$1" | nc -U "$SOCK" 2>/dev/null)
 fi
@@ -41,7 +41,7 @@ printf '%s' "$RESULT"
 
 tmux config:
 ```
-set -g status-right '#(~/.tmux-agents/status_client.sh "#{pane_id}") %H:%M'
+set -g status-right '#(~/.tmux-sentinel/status_client.sh "#{pane_id}") %H:%M'
 ```
 
 ### Picker (`picker.py`)
@@ -59,19 +59,19 @@ One connection per request (no persistent connections). The daemon handles multi
 
 ## Lifecycle
 
-- **Start:** Lazy-started by the status bar client on first poll (or manually via `python3 -m tmux_agents.daemon`).
+- **Start:** Lazy-started by the status bar client on first poll (or manually via `python3 -m tmux_sentinel.daemon`).
 - **Stop:** Exits when it detects no tmux server is running (checked periodically). Also exits on SIGTERM.
 - **Crash recovery:** Status bar client gets no response, restarts the daemon on next poll. Up to one poll cycle of missing output (acceptable).
 
 ## Development approach
 
-The daemon code lives in a separate package (`tmux_agents_daemon/`) alongside the existing `tmux_agents/`. The existing code continues to work unchanged — both can run side-by-side until the daemon is proven and the cutover happens.
+The daemon code lives in a separate package (`tmux_sentinel_daemon/`) alongside the existing `tmux_sentinel/`. The existing code continues to work unchanged — both can run side-by-side until the daemon is proven and the cutover happens.
 
-- `tmux_agents_daemon/daemon.py` — the server
-- `tmux_agents_daemon/hook_client.py` — lightweight hook sender
+- `tmux_sentinel_daemon/daemon.py` — the server
+- `tmux_sentinel_daemon/hook_client.py` — lightweight hook sender
 - `bin/status_client.sh` — status bar shell script
 
-The daemon may reuse shared modules from `tmux_agents/` (process.py, tmux.py, formatting.py) via import.
+The daemon may reuse shared modules from `tmux_sentinel/` (process.py, tmux.py, formatting.py) via import.
 
 ## Migration (later)
 

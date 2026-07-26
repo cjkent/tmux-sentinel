@@ -1,5 +1,5 @@
 """
-Tmux command wrappers for tmux-agents.
+Tmux command wrappers for tmux-sentinel.
 
 All functions shell out to the `tmux` binary and parse its output.
 Returns empty/default values if tmux is not running or commands fail.

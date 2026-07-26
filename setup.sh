@@ -1,10 +1,10 @@
 #!/bin/bash
-# tmux-agents setup
+# tmux-sentinel setup
 #
 # Configures tmux and Kiro CLI for agent status tracking. Does three things:
 #   1. Injects hook entries into Kiro agent JSON configs (all 5 lifecycle events)
 #   2. Configures tmux options (bell monitoring, status bar, keybinding)
-#   3. Creates the status directory (~/.tmux-agents/status/)
+#   3. Creates the status directory (~/.tmux-sentinel/status/)
 #
 # Hooks are additive — existing hooks in agent configs are preserved.
 # The injection is idempotent — running setup again won't duplicate hooks.
@@ -29,9 +29,9 @@ error() { echo -e "${RED}✗${NC} $1"; }
 step()  { echo -e "\n${BOLD}$1${NC}"; }
 
 REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
-HOOK_CMD="PYTHONPATH=$REPO_DIR python3 -S $REPO_DIR/tmux_agents/hook.py"
+HOOK_CMD="PYTHONPATH=$REPO_DIR python3 -S $REPO_DIR/tmux_sentinel/hook.py"
 AGENTS_DIR="$HOME/.kiro/agents"
-STATUS_DIR="$HOME/.tmux-agents/status"
+STATUS_DIR="$HOME/.tmux-sentinel/status"
 
 # Interactive checkbox picker with keyboard navigation.
 # Renders a list of items with [x] checkboxes. All items start checked.
@@ -99,21 +99,21 @@ run_picker() {
 }
 
 # Check if an agent config already has our hooks in all 5 events.
-# Matches hooks whose command path contains "tmux-agents/...notify.sh".
+# Matches hooks whose command path contains "tmux-sentinel/...notify.sh".
 # Returns 0 (true) if all 5 events have our hook, 1 (false) otherwise.
 has_hooks() {
     local f="$1"
     local count
-    count=$(jq '[.hooks.agentSpawn, .hooks.userPromptSubmit, .hooks.preToolUse, .hooks.postToolUse, .hooks.stop | select(. != null) | map(select(.command | test("tmux_agents.*hook\\.py"))) | select(length > 0)] | length' "$f" 2>/dev/null)
+    count=$(jq '[.hooks.agentSpawn, .hooks.userPromptSubmit, .hooks.preToolUse, .hooks.postToolUse, .hooks.stop | select(. != null) | map(select(.command | test("tmux_sentinel.*hook\\.py"))) | select(length > 0)] | length' "$f" 2>/dev/null)
     [ "$count" -eq 5 ]
 }
 
 # --- Remove hooks mode ---
-# Strips tmux-agents hook entries from selected agent configs.
+# Strips tmux-sentinel hook entries from selected agent configs.
 # Uses jq to filter out entries whose command contains "notify.sh",
 # then cleans up empty hook arrays and objects.
 if [ "${1:-}" = "--remove-hooks" ]; then
-    echo -e "${BOLD}tmux-agents — remove hooks${NC}"
+    echo -e "${BOLD}tmux-sentinel — remove hooks${NC}"
     echo ""
 
     HOOKED=()
@@ -129,7 +129,7 @@ if [ "${1:-}" = "--remove-hooks" ]; then
     done
 
     if [ "${#HOOKED[@]}" -eq 0 ]; then
-        info "No agents have tmux-agents hooks"
+        info "No agents have tmux-sentinel hooks"
         exit 0
     fi
 
@@ -151,14 +151,14 @@ if [ "${1:-}" = "--remove-hooks" ]; then
 
     # Also remove from Claude Code settings
     CLAUDE_SETTINGS="$HOME/.claude/settings.json"
-    if [ -f "$CLAUDE_SETTINGS" ] && jq -e '.hooks // {} | to_entries[] | .value[]?.hooks[]? | select(.command | test("tmux_agents.*hook\\.py"))' "$CLAUDE_SETTINGS" >/dev/null 2>&1; then
+    if [ -f "$CLAUDE_SETTINGS" ] && jq -e '.hooks // {} | to_entries[] | .value[]?.hooks[]? | select(.command | test("tmux_sentinel.*hook\\.py"))' "$CLAUDE_SETTINGS" >/dev/null 2>&1; then
         echo -n "  Also remove hooks from Claude Code settings? [Y/n] "
         read -r answer
         if [ "${answer:-Y}" != "n" ] && [ "${answer:-Y}" != "N" ]; then
             CC_EVENTS="SessionStart UserPromptSubmit PreToolUse PostToolUse Stop"
             jq_filter='.'
             for evt in $CC_EVENTS; do
-                jq_filter+=" | if .hooks.${evt} then .hooks.${evt} = [.hooks.${evt}[] | .hooks = [.hooks[] | select(.command | test(\"tmux_agents.*hook\\\\.py\") | not)] | select(.hooks | length > 0)] else . end"
+                jq_filter+=" | if .hooks.${evt} then .hooks.${evt} = [.hooks.${evt}[] | .hooks = [.hooks[] | select(.command | test(\"tmux_sentinel.*hook\\\\.py\") | not)] | select(.hooks | length > 0)] else . end"
                 jq_filter+=" | if .hooks.${evt} == [] then del(.hooks.${evt}) else . end"
             done
             jq_filter+=' | if .hooks == {} then del(.hooks) else . end'
@@ -170,7 +170,7 @@ if [ "${1:-}" = "--remove-hooks" ]; then
 fi
 
 # --- Main setup ---
-echo -e "${BOLD}tmux-agents setup${NC}"
+echo -e "${BOLD}tmux-sentinel setup${NC}"
 echo ""
 
 # 1. Check dependencies
@@ -207,9 +207,9 @@ for f in "$AGENTS_DIR"/*.json; do
 done
 
 if [ "${#ELIGIBLE[@]}" -eq 0 ]; then
-    info "All agents already have tmux-agents hooks"
+    info "All agents already have tmux-sentinel hooks"
 else
-    run_picker "Select agents to add tmux-agents hooks to:" "${ELIGIBLE_LABELS[@]}"
+    run_picker "Select agents to add tmux-sentinel hooks to:" "${ELIGIBLE_LABELS[@]}"
 
     # Backup agent configs before modifying, then inject our hook into
         # all 5 lifecycle events. The jq filter is idempotent — it only adds
@@ -229,9 +229,9 @@ else
         for f in "${SELECTED[@]}"; do
             jq_filter='. | if .hooks == null then .hooks = {} else . end'
             for evt in $EVENTS; do
-                jq_filter+=" | if .hooks.${evt} then .hooks.${evt} = [.hooks.${evt}[] | select(.command | test(\"tmux-agents/.*notify\\\\.sh\") | not)] else . end"
-                jq_filter+=" | if (.hooks.${evt} // [] | map(select(.command | test(\"tmux_agents.*hook\\\\.py\"))) | length) == 0"
-                jq_filter+=" then .hooks.${evt} = (.hooks.${evt} // []) + [{\"command\": \"${HOOK_CMD}\", \"description\": \"tmux-agents status tracking\"}]"
+                jq_filter+=" | if .hooks.${evt} then .hooks.${evt} = [.hooks.${evt}[] | select(.command | test(\"tmux-sentinel/.*notify\\\\.sh\") | not)] else . end"
+                jq_filter+=" | if (.hooks.${evt} // [] | map(select(.command | test(\"tmux_sentinel.*hook\\\\.py\"))) | length) == 0"
+                jq_filter+=" then .hooks.${evt} = (.hooks.${evt} // []) + [{\"command\": \"${HOOK_CMD}\", \"description\": \"tmux-sentinel status tracking\"}]"
                 jq_filter+=" else . end"
             done
             result=$(jq "$jq_filter" "$f" 2>/dev/null) && echo "$result" > "$f" && ((UPDATED++)) || true
@@ -248,10 +248,10 @@ CLAUDE_SETTINGS="$HOME/.claude/settings.json"
 CC_EVENTS="SessionStart UserPromptSubmit PreToolUse PostToolUse Stop"
 
 if [ -f "$CLAUDE_SETTINGS" ]; then
-    if jq -e '.hooks // {} | to_entries[] | .value[]?.hooks[]? | select(.command | test("tmux_agents.*hook\\.py"))' "$CLAUDE_SETTINGS" >/dev/null 2>&1; then
+    if jq -e '.hooks // {} | to_entries[] | .value[]?.hooks[]? | select(.command | test("tmux_sentinel.*hook\\.py"))' "$CLAUDE_SETTINGS" >/dev/null 2>&1; then
         info "Claude Code hooks already configured"
     else
-        echo -n "  Add tmux-agents hooks to Claude Code? [Y/n] "
+        echo -n "  Add tmux-sentinel hooks to Claude Code? [Y/n] "
         read -r answer
         if [ "${answer:-Y}" != "n" ] && [ "${answer:-Y}" != "N" ]; then
             cp "$CLAUDE_SETTINGS" "$CLAUDE_SETTINGS.backup.$(date +%Y%m%d%H%M%S)"
@@ -259,7 +259,7 @@ if [ -f "$CLAUDE_SETTINGS" ]; then
             jq_filter='. | if .hooks == null then .hooks = {} else . end'
             for evt in $CC_EVENTS; do
                 jq_filter+=" | .hooks.${evt} = (.hooks.${evt} // [])"
-                jq_filter+=" | if ([.hooks.${evt}[] | .hooks[]? | select(.command | test(\"tmux_agents.*hook\\\\.py\"))] | length) == 0"
+                jq_filter+=" | if ([.hooks.${evt}[] | .hooks[]? | select(.command | test(\"tmux_sentinel.*hook\\\\.py\"))] | length) == 0"
                 jq_filter+=" then .hooks.${evt} += [{\"matcher\": \"\", \"hooks\": [{\"type\": \"command\", \"command\": \"${HOOK_CMD}\"}]}]"
                 jq_filter+=" else . end"
             done
@@ -269,7 +269,7 @@ if [ -f "$CLAUDE_SETTINGS" ]; then
         fi
     fi
 else
-    echo -n "  Create Claude Code settings with tmux-agents hooks? [Y/n] "
+    echo -n "  Create Claude Code settings with tmux-sentinel hooks? [Y/n] "
     read -r answer
     if [ "${answer:-Y}" != "n" ] && [ "${answer:-Y}" != "N" ]; then
         mkdir -p "$(dirname "$CLAUDE_SETTINGS")"
@@ -300,7 +300,7 @@ tmux set -g status-interval 5 2>/dev/null && info "status-interval 5s" || warn "
 # The #() syntax tells tmux to execute the command and insert its output.
 tmux set -g status-right "#($REPO_DIR/bin/status_client.sh '#{pane_id}') %H:%M" 2>/dev/null && info "status-right configured" || warn "Could not set status-right"
 # Bind Ctrl+b a to open the agent picker popup
-tmux bind-key a display-popup -w 70% -h 50% -E "PYTHONPATH=$REPO_DIR python3 -S $REPO_DIR/tmux_agents/picker.py" 2>/dev/null && info "Ctrl+b a bound to agent picker" || warn "Could not bind key"
+tmux bind-key a display-popup -w 70% -h 50% -E "PYTHONPATH=$REPO_DIR python3 -S $REPO_DIR/tmux_sentinel/picker.py" 2>/dev/null && info "Ctrl+b a bound to agent picker" || warn "Could not bind key"
 
 step "Setup complete!"
 echo ""

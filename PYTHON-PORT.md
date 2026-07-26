@@ -7,8 +7,8 @@ Bash is getting brittle — process tree walking via ps+awk, column alignment vi
 ## Structure
 
 ```
-tmux-agents/
-├── tmux_agents/
+tmux-sentinel/
+├── tmux_sentinel/
 │   ├── __init__.py
 │   ├── status.py        # Read/write status files, cleanup stale
 │   ├── process.py       # Detect kiro-cli in pane process trees
@@ -32,9 +32,9 @@ tmux-agents/
 
 Three shell-callable entry points, invoked the same way as today:
 
-- `python3 -m tmux_agents.hook` — called by Kiro CLI hooks (reads JSON from stdin)
-- `python3 -m tmux_agents.picker` — called by tmux display-popup
-- `python3 -m tmux_agents.statusbar` — called by tmux status-right via `#()`
+- `python3 -m tmux_sentinel.hook` — called by Kiro CLI hooks (reads JSON from stdin)
+- `python3 -m tmux_sentinel.picker` — called by tmux display-popup
+- `python3 -m tmux_sentinel.statusbar` — called by tmux status-right via `#()`
 
 ## Module Responsibilities
 
@@ -105,7 +105,7 @@ Three shell-callable entry points, invoked the same way as today:
 
 ## Migration Steps
 
-1. Create `tmux_agents/` package with `status.py`, `process.py`, `tmux.py`, `formatting.py`
+1. Create `tmux_sentinel/` package with `status.py`, `process.py`, `tmux.py`, `formatting.py`
 2. Port `hook.py` + tests — verify with real Kiro agent
 3. Port `statusbar.py` + tests — verify status bar works
 4. Port `picker.py` + tests — verify popup works

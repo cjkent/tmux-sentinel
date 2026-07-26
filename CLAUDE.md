@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-tmux-agents is a Python package that monitors multiple AI agent sessions (Kiro CLI and Claude Code) running in tmux. It tracks agent status via lifecycle hooks and surfaces information through a window picker, status bar, and bell notifications.
+tmux-sentinel is a Python package that monitors multiple AI agent sessions (Kiro CLI and Claude Code) running in tmux. It tracks agent status via lifecycle hooks and surfaces information through a window picker, status bar, and bell notifications.
 
 ## Commands
 
@@ -20,7 +20,7 @@ PYTHONPATH=. python3 tests/test_hook.py
 
 ### Start the daemon manually
 ```bash
-PYTHONPATH=. python3 -m tmux_agents_daemon
+PYTHONPATH=. python3 -m tmux_sentinel_daemon
 ```
 
 ### Setup (installs hooks into Kiro agent configs and Claude Code settings, configures tmux)
@@ -32,18 +32,18 @@ PYTHONPATH=. python3 -m tmux_agents_daemon
 
 Two packages, stdlib only (no pip dependencies):
 
-### `tmux_agents/` — shared modules and legacy entry points
+### `tmux_sentinel/` — shared modules and legacy entry points
 
-- `hook.py` — called by Kiro CLI and Claude Code on lifecycle events, writes status JSON to `~/.tmux-agents/status/<pane-id>.json`
+- `hook.py` — called by Kiro CLI and Claude Code on lifecycle events, writes status JSON to `~/.tmux-sentinel/status/<pane-id>.json`
 - `picker.py` — called on `Ctrl+b a`, shows fzf popup of all windows with agent status
 - `status.py` — status file I/O, flag files (`.error`, `.unseen`), stale cleanup
 - `process.py` — detects which panes have an interactive agent running (`kiro-cli chat` or `claude`) via ps tree walk
 - `tmux.py` — thin wrappers around tmux CLI commands
 - `formatting.py` — column alignment, ANSI colors, elapsed time (pure functions)
 
-### `tmux_agents_daemon/` — long-running daemon (replaces the old statusbar.py polling)
+### `tmux_sentinel_daemon/` — long-running daemon (replaces the old statusbar.py polling)
 
-- `daemon.py` — asyncio server listening on `~/.tmux-agents/daemon.sock`, handles hook events and status queries
+- `daemon.py` — asyncio server listening on `~/.tmux-sentinel/daemon.sock`, handles hook events and status queries
 - `state.py` — `DaemonState` class, holds per-pane agent status in memory
 - `poll.py` — periodic process tree walk + screen-scrape, updates in-memory state
 - `status_format.py` — builds tmux format strings from daemon state
@@ -82,7 +82,7 @@ Claude Code's plan confirmation prompt ("Would you like to proceed?" with `shift
 **Daemon lifecycle:**
 - Lazy-started by `bin/status_client.sh` on first tmux poll, or manually
 - Exits on SIGTERM or when no tmux server is running
-- PID file at `~/.tmux-agents/daemon.pid`
+- PID file at `~/.tmux-sentinel/daemon.pid`
 
 **Hook configuration:**
 - Kiro CLI: hooks are injected into `~/.kiro/agents/*.json`

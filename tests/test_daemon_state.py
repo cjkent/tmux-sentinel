@@ -5,8 +5,8 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from tmux_agents_daemon.state import DaemonState, PaneState
-from tmux_agents.status import IDLE, WORKING, WAITING, ERROR
+from tmux_sentinel_daemon.state import DaemonState, PaneState
+from tmux_sentinel.status import IDLE, WORKING, WAITING, ERROR
 
 
 def test_apply_agent_spawn():

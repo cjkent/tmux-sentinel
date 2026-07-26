@@ -1,5 +1,5 @@
 """
-Formatting utilities for tmux-agents.
+Formatting utilities for tmux-sentinel.
 
 Handles column alignment, ANSI color codes, elapsed time formatting,
 and status label rendering. Used by both the picker and status bar.

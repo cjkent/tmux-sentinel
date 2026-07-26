@@ -6,7 +6,7 @@ and disconnects. If the daemon isn't running, exits silently — the daemon
 reconstructs state from the process tree on its own.
 
 Usage:
-    python3 -S -m tmux_agents_daemon.hook_client
+    python3 -S -m tmux_sentinel_daemon.hook_client
 """
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ import socket
 import sys
 from pathlib import Path
 
-SOCK_PATH = Path.home() / ".tmux-agents" / "daemon.sock"
+SOCK_PATH = Path.home() / ".tmux-sentinel" / "daemon.sock"
 
 
 def send_event(event: dict, pane_id: str) -> bool:
