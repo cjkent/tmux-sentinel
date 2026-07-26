@@ -4,13 +4,14 @@ from pathlib import Path
 
 from tmux_agents.status import IDLE, WORKING, WAITING, write_status, set_unseen
 from tmux_agents.tmux import PaneInfo
-from tmux_agents.picker import _build_rows, _colorize_line
+from tmux_agents.picker import _build_rows, _colorize_line, _display_name
 
 
-def _make_pane(pane_id="99990", session="test", window_index="0", window_name="zsh", path="/tmp"):
+def _make_pane(pane_id="99990", session="test", window_index="0", window_name="zsh", path="/tmp", title=""):
     return PaneInfo(
         pane_id=pane_id, pane_pid="1000", session=session,
         window_index=window_index, window_name=window_name, pane_current_path=path,
+        pane_title=title,
     )
 
 
@@ -163,6 +164,42 @@ def test_generate_list_from_daemon_calls_cleanup_stale():
         pm.current_session_window = orig_csw
 
     assert calls == [{"other-pane"}]
+
+
+def test_display_name_uses_claude_title_when_agent():
+    pane = _make_pane(window_name="claude", title="✳ Fix the flaky test")
+    assert _display_name(pane, "claude") == "Fix the flaky test"
+
+
+def test_display_name_falls_back_to_window_name_for_non_agent():
+    # Same title string, but the pane isn't a known agent — must not use it.
+    pane = _make_pane(window_name="zsh", title="✳ Fix the flaky test")
+    assert _display_name(pane, "") == "zsh"
+
+
+def test_display_name_rejects_bare_hash_title():
+    # Idle/default shell title (no spinner glyph, just a hex-looking hash)
+    # must not be shown as if it were a task.
+    pane = _make_pane(window_name="claude", title="80a9972fcf5b")
+    assert _display_name(pane, "claude") == "claude"
+
+
+def test_display_name_falls_back_when_no_title():
+    pane = _make_pane(window_name="claude", title="")
+    assert _display_name(pane, "claude") == "claude"
+
+
+def test_display_name_truncates_long_title():
+    long_title = "✳ " + "x" * 60
+    pane = _make_pane(window_name="claude", title=long_title)
+    name = _display_name(pane, "claude")
+    assert name.endswith("…")
+    assert len(name) == 41  # _MAX_TITLE_LEN + ellipsis
+
+
+def test_display_name_works_for_kiro_too():
+    pane = _make_pane(window_name="kiro", title="⠐ Refactor the parser")
+    assert _display_name(pane, "kiro") == "Refactor the parser"
 
 
 if __name__ == "__main__":

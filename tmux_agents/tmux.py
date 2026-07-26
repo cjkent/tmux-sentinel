@@ -18,6 +18,7 @@ class PaneInfo:
     window_index: str
     window_name: str
     pane_current_path: str
+    pane_title: str = ""
 
 
 def _run_tmux(*args: str) -> str:
@@ -36,12 +37,12 @@ def _run_tmux(*args: str) -> str:
 
 def list_panes() -> list[PaneInfo]:
     """List all panes across all sessions with metadata."""
-    fmt = "#{pane_id}|#{pane_pid}|#{session_name}|#{window_index}|#{window_name}|#{pane_current_path}"
+    fmt = "#{pane_id}|#{pane_pid}|#{session_name}|#{window_index}|#{window_name}|#{pane_current_path}|#{pane_title}"
     output = _run_tmux("list-panes", "-a", "-F", fmt)
     panes = []
     for line in output.splitlines():
-        parts = line.split("|", 5)
-        if len(parts) == 6:
+        parts = line.split("|", 6)
+        if len(parts) == 7:
             panes.append(PaneInfo(
                 pane_id=parts[0].lstrip("%"),
                 pane_pid=parts[1],
@@ -49,6 +50,7 @@ def list_panes() -> list[PaneInfo]:
                 window_index=parts[3],
                 window_name=parts[4],
                 pane_current_path=parts[5],
+                pane_title=parts[6],
             ))
     return panes
 

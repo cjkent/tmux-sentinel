@@ -49,6 +49,30 @@ from tmux_agents.formatting import (
 
 _AGENT_ICONS = {"kiro": "👻", "claude": "🟠"}
 
+_MAX_TITLE_LEN = 40
+
+
+def _display_name(pane: PaneInfo, agent_type: str) -> str:
+    """Return the name to show for a pane: an agent's live task title when
+    available, otherwise the tmux window name.
+
+    Claude Code sets pane_title via OSC escape codes as "<spinner-glyph>
+    <task summary>" while it works. We only trust the title for panes we
+    already know are running an agent (same detection that drives the icon
+    column), since a plain shell's title is just whatever the last command
+    happened to set (often a hash-looking string from the prompt).
+    """
+    if agent_type in _AGENT_ICONS and pane.pane_title:
+        title = pane.pane_title.strip()
+        # Strip a single leading spinner glyph (non-alphanumeric char + space).
+        if title and not title[0].isalnum():
+            title = title[1:].strip()
+        # Reject a bare hex-looking hash (idle/default title, not a task).
+        elif title and len(title) >= 8 and all(c in "0123456789abcdef" for c in title.lower()):
+            title = ""
+        if title:
+            return title[:_MAX_TITLE_LEN] + ("…" if len(title) > _MAX_TITLE_LEN else "")
+    return pane.window_name
 
 
 def _build_rows(
@@ -148,9 +172,10 @@ def _build_rows(
 
             short_cwd = cwd.replace(home, "~", 1) if cwd.startswith(home) else cwd
             marker = "► " if (p.session == cur_session and p.window_index == cur_window) else "  "
+            name = _display_name(p, at.get(p.pane_id, ""))
 
             rows.append([
-                f"{marker}{p.window_index}: {p.window_name}",
+                f"{marker}{p.window_index}: {name}",
                 agent_icon,
                 icon_display,
                 short_cwd,
