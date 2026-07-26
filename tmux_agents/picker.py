@@ -52,6 +52,45 @@ _AGENT_ICONS = {"kiro": "👻", "claude": "🟠"}
 _MAX_TITLE_LEN = 40
 
 
+def _home_symlink_targets(home: str) -> dict[str, str]:
+    """Map resolved-symlink-target -> '~/name' for symlinked directories
+    directly under $HOME (e.g. ~/workplace -> /Volumes/workplace).
+
+    Lets _shorten_path show '~/workplace/foo' instead of the raw
+    '/Volumes/workplace/foo' a pane's cwd resolves to, since tmux/the shell
+    report the real path, not the symlinked one the user actually navigates.
+    """
+    targets: dict[str, str] = {}
+    try:
+        with os.scandir(home) as entries:
+            for entry in entries:
+                if entry.is_symlink():
+                    try:
+                        target = os.path.realpath(entry.path)
+                    except OSError:
+                        continue
+                    if os.path.isdir(target):
+                        targets[target] = f"~/{entry.name}"
+    except OSError:
+        pass
+    return targets
+
+
+def _shorten_path(path: str, home: str, home_symlinks: dict[str, str]) -> str:
+    """Shorten a path using $HOME, then the longest matching home symlink."""
+    if path.startswith(home):
+        return "~" + path[len(home):]
+    best = None
+    for target, alias in home_symlinks.items():
+        if path == target or path.startswith(target + "/"):
+            if best is None or len(target) > len(best[0]):
+                best = (target, alias)
+    if best:
+        target, alias = best
+        return alias + path[len(target):]
+    return path
+
+
 def _display_name(pane: PaneInfo, agent_type: str) -> str:
     """Return the name to show for a pane: an agent's live task title when
     available, otherwise the tmux window name.
@@ -106,6 +145,7 @@ def _build_rows(
     gb = git_branches or {}
     ds = daemon_state or {}
     home = os.path.expanduser("~")
+    home_symlinks = _home_symlink_targets(home)
     rows: list[list[str]] = []
     targets: list[str] = []
 
@@ -170,7 +210,7 @@ def _build_rows(
                 git_branch = gb.get(p.pane_id, "")
                 branch = f"({git_branch})" if git_branch else ""
 
-            short_cwd = cwd.replace(home, "~", 1) if cwd.startswith(home) else cwd
+            short_cwd = _shorten_path(cwd, home, home_symlinks)
             marker = "► " if (p.session == cur_session and p.window_index == cur_window) else "  "
             name = _display_name(p, at.get(p.pane_id, ""))
 

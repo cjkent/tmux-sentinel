@@ -4,7 +4,10 @@ from pathlib import Path
 
 from tmux_agents.status import IDLE, WORKING, WAITING, write_status, set_unseen
 from tmux_agents.tmux import PaneInfo
-from tmux_agents.picker import _build_rows, _colorize_line, _display_name
+from tmux_agents.picker import (
+    _build_rows, _colorize_line, _display_name,
+    _shorten_path, _home_symlink_targets,
+)
 
 
 def _make_pane(pane_id="99990", session="test", window_index="0", window_name="zsh", path="/tmp", title=""):
@@ -200,6 +203,61 @@ def test_display_name_truncates_long_title():
 def test_display_name_works_for_kiro_too():
     pane = _make_pane(window_name="kiro", title="⠐ Refactor the parser")
     assert _display_name(pane, "kiro") == "Refactor the parser"
+
+
+def test_shorten_path_home_prefix():
+    assert _shorten_path("/Users/cjkent/dev/tmux-agents", "/Users/cjkent", {}) == "~/dev/tmux-agents"
+
+
+def test_shorten_path_home_symlink():
+    syms = {"/Volumes/workplace": "~/workplace"}
+    got = _shorten_path("/Volumes/workplace/PVRF-820/src", "/Users/cjkent", syms)
+    assert got == "~/workplace/PVRF-820/src"
+
+
+def test_shorten_path_exact_symlink_target():
+    syms = {"/Volumes/workplace": "~/workplace"}
+    assert _shorten_path("/Volumes/workplace", "/Users/cjkent", syms) == "~/workplace"
+
+
+def test_shorten_path_prefers_longest_symlink_match():
+    # A sibling path that merely starts with the same characters must not match.
+    syms = {"/Volumes/work": "~/work", "/Volumes/workplace": "~/workplace"}
+    got = _shorten_path("/Volumes/workplace/foo", "/Users/cjkent", syms)
+    assert got == "~/workplace/foo"
+
+
+def test_shorten_path_no_match_passes_through():
+    syms = {"/Volumes/workplace": "~/workplace"}
+    assert _shorten_path("/tmp/scratch", "/Users/cjkent", syms) == "/tmp/scratch"
+
+
+def test_shorten_path_similar_prefix_not_matched():
+    # /Volumes/workplace2 must not be treated as inside /Volumes/workplace.
+    syms = {"/Volumes/workplace": "~/workplace"}
+    assert _shorten_path("/Volumes/workplace2/foo", "/Users/cjkent", syms) == "/Volumes/workplace2/foo"
+
+
+def test_home_symlink_targets_finds_dir_symlink():
+    import os
+    home = Path(tempfile.mkdtemp())
+    real_target = home / "elsewhere"
+    real_target.mkdir()
+    (home / "linked").symlink_to(real_target)
+    (home / "not_a_symlink").mkdir()
+
+    targets = _home_symlink_targets(str(home))
+    # Compare against the resolved path, since e.g. macOS /var -> /private/var
+    # means realpath() may not equal the path we built the symlink from.
+    assert targets == {os.path.realpath(real_target): "~/linked"}
+
+
+def test_home_symlink_targets_ignores_broken_symlink():
+    home = Path(tempfile.mkdtemp())
+    (home / "broken").symlink_to(home / "does-not-exist")
+
+    targets = _home_symlink_targets(str(home))
+    assert targets == {}
 
 
 if __name__ == "__main__":
