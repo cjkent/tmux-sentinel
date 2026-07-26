@@ -39,7 +39,7 @@ from tmux_agents.hook import _get_git_branch
 from tmux_agents.process import get_kiro_panes, get_agent_types
 from tmux_agents.tmux import (
     list_panes, list_sessions, pane_pids,
-    current_session, current_window_index, switch_to, PaneInfo,
+    current_session, current_window_index, current_session_window, switch_to, PaneInfo,
 )
 from tmux_agents.formatting import (
     elapsed, status_label, colorize_status, align_columns,
@@ -202,7 +202,14 @@ def _generate_list_from_daemon(daemon_state: dict) -> str:
     """Build the list from the daemon's state snapshot (fast path)."""
     from concurrent.futures import ThreadPoolExecutor
     from tmux_agents.hook import _get_git_branch
-    from tmux_agents.tmux import current_session_window
+
+    # The daemon's keys are exactly the panes it currently sees an agent
+    # running in (populated via its own ps walk + hook events). Remove status
+    # files for any pane not in that set, so an exited agent's last-known
+    # status doesn't linger and get picked up by the status-file fallback
+    # below. This is the fast-path equivalent of _generate_list_direct's
+    # cleanup_stale call — pure file I/O, no subprocess, so it's free here.
+    cleanup_stale(set(daemon_state.keys()))
 
     # The three independent tmux queries and (once panes are known) the git
     # lookups all shell out; run them concurrently so their latencies overlap.

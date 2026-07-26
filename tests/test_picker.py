@@ -136,6 +136,35 @@ def test_daemon_state_unseen_marker():
     assert "●" in rows[1][2]
 
 
+def test_generate_list_from_daemon_calls_cleanup_stale():
+    # Regression: an agent exits (daemon correctly stops tracking the pane),
+    # but its status file lingers on disk. Without cleanup, the picker's
+    # status-file fallback would still show it as an agent ([IDL], no orange
+    # badge). _generate_list_from_daemon must clear stale files using the
+    # daemon's own pane set as the liveness truth (it has no ps walk of its
+    # own to derive one).
+    import tmux_agents.picker as pm
+
+    pane = _make_pane()
+    calls = []
+    orig_cleanup_stale = pm.cleanup_stale
+    orig_list_panes, orig_list_sessions = pm.list_panes, pm.list_sessions
+    orig_csw = pm.current_session_window
+    pm.cleanup_stale = lambda live_ids: calls.append(set(live_ids))
+    pm.list_panes = lambda: [pane]
+    pm.list_sessions = lambda: [pane.session]
+    pm.current_session_window = lambda: (pane.session, pane.window_index)
+    try:
+        pm._generate_list_from_daemon({"other-pane": {}})
+    finally:
+        pm.cleanup_stale = orig_cleanup_stale
+        pm.list_panes = orig_list_panes
+        pm.list_sessions = orig_list_sessions
+        pm.current_session_window = orig_csw
+
+    assert calls == [{"other-pane"}]
+
+
 if __name__ == "__main__":
     for name, func in sorted(globals().items()):
         if name.startswith("test_") and callable(func):
