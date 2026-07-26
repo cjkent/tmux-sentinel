@@ -110,10 +110,43 @@ def test_unknown_command():
     print("  ✓ test_unknown_command")
 
 
+def test_singleton_lock_second_acquire_fails():
+    # Regression: status_client.sh's lazy-start had no locking, so multiple
+    # tmux panes polling with no daemon running could each spawn one — the
+    # loser never exited (daemon startup unconditionally rebound the socket,
+    # and the "no tmux sessions" shutdown check almost never fires in
+    # practice), leaving permanent orphans. _acquire_singleton_lock must let
+    # exactly one caller through.
+    import tmux_sentinel_daemon.daemon as daemon_mod
+
+    with tempfile.TemporaryDirectory() as td:
+        orig_lock_file = daemon_mod.LOCK_FILE
+        daemon_mod.LOCK_FILE = Path(td) / "daemon.lock"
+        try:
+            fh1 = daemon_mod._acquire_singleton_lock()
+            assert fh1 is not None
+
+            fh2 = daemon_mod._acquire_singleton_lock()
+            assert fh2 is None
+
+            fh1.close()
+            # Releasing the first lock (closing its fd) must let a new
+            # acquire succeed — confirms this is a live lock, not a
+            # one-shot "file already existed" check.
+            fh3 = daemon_mod._acquire_singleton_lock()
+            assert fh3 is not None
+            fh3.close()
+        finally:
+            daemon_mod.LOCK_FILE = orig_lock_file
+
+    print("  ✓ test_singleton_lock_second_acquire_fails")
+
+
 if __name__ == "__main__":
     test_status_query_empty()
     test_status_query_with_working()
     test_hook_event()
     test_status_query_marks_seen()
     test_unknown_command()
+    test_singleton_lock_second_acquire_fails()
     print("\nAll tests passed")

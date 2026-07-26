@@ -12,11 +12,13 @@ Protocol (one connection per request, line-based text):
 
 Lifecycle:
   - Lazy-started by the status bar client or manually via python3 -m tmux_sentinel_daemon
-  - Exits on SIGTERM or when no tmux server is running
+  - Exits on SIGTERM, when no tmux server is running, or immediately on startup
+    if another instance is already running (see single-instance lock below)
 """
 from __future__ import annotations
 
 import asyncio
+import fcntl
 import json
 import logging
 import os
@@ -48,11 +50,35 @@ from tmux_sentinel_daemon.status_format import format_status_output
 SOCK_DIR = Path.home() / ".tmux-sentinel"
 SOCK_PATH = SOCK_DIR / "daemon.sock"
 PID_FILE = SOCK_DIR / "daemon.pid"
+LOCK_FILE = SOCK_DIR / "daemon.lock"
 
 POLL_INTERVAL_IDLE = 30.0
 POLL_INTERVAL_ACTIVE = 5.0
 
 log = logging.getLogger("tmux-sentinel-daemon")
+
+
+def _acquire_singleton_lock() -> object:
+    """Return an open file handle holding an exclusive, non-blocking flock on
+    LOCK_FILE, or None if another daemon already holds it.
+
+    flock is atomic at the kernel level, so this closes the race that let
+    status_client.sh's lazy-start spawn multiple daemons when several tmux
+    panes polled at once with no daemon running: each would independently
+    see "no daemon" and start one, and since startup unconditionally deleted
+    and rebound the socket, every loser became an orphan that never exited
+    (the shutdown check only fires when tmux itself has no sessions, which
+    is essentially never true for a laptop kept awake with tmux running).
+    The file handle must be kept open for the lock to hold — do not close it
+    while the daemon is meant to be running.
+    """
+    fh = open(LOCK_FILE, "w")
+    try:
+        fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        fh.close()
+        return None
+    return fh
 
 
 async def handle_connection(
@@ -133,6 +159,12 @@ async def run_daemon() -> None:
     )
 
     SOCK_DIR.mkdir(parents=True, exist_ok=True)
+
+    lock_fh = _acquire_singleton_lock()
+    if lock_fh is None:
+        log.info("Another daemon instance is already running, exiting")
+        return
+
     if SOCK_PATH.exists():
         SOCK_PATH.unlink()
 
@@ -165,6 +197,8 @@ async def run_daemon() -> None:
 
     SOCK_PATH.unlink(missing_ok=True)
     PID_FILE.unlink(missing_ok=True)
+    lock_fh.close()
+    LOCK_FILE.unlink(missing_ok=True)
     log.info("Daemon shut down")
 
 
