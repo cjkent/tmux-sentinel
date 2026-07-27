@@ -62,10 +62,10 @@ Five events are handled:
 
 ### Picker (`tmux_sentinel/picker.py`)
 
-Called by tmux when the user presses `Ctrl+b a`. Runs inside a `display-popup` overlay.
+Called by tmux when the user presses the picker keybind (`Alt+Space` by default, configurable during setup). Runs inside a `display-popup` overlay.
 
 ```
-Ctrl+b a → tmux display-popup → picker.py → fzf → tmux switch-client/select-window
+Alt+Space → tmux display-popup → picker.py → fzf → tmux switch-client/select-window
 ```
 
 **Agent detection is based on status files, not process detection.** Only panes where the hook has fired (creating a status file) are shown as agents. This prevents false positives from processes that run kiro-cli non-interactively.
@@ -157,7 +157,7 @@ Agent runs in tmux pane
   │   └─ bin/status_client.sh queries daemon
   │       └─ Daemon responds with tmux format string
   │
-  └─ User presses Ctrl+b a:
+  └─ User presses the picker keybind (Alt+Space by default):
       └─ picker.py
           ├─ Reads status files
           ├─ Screen-scrapes "working" agents

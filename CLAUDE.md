@@ -35,7 +35,7 @@ Two packages, stdlib only (no pip dependencies):
 ### `tmux_sentinel/` — shared modules and legacy entry points
 
 - `hook.py` — called by Kiro CLI and Claude Code on lifecycle events, writes status JSON to `~/.tmux-sentinel/status/<pane-id>.json`
-- `picker.py` — called on `Ctrl+b a`, shows fzf popup of all windows with agent status
+- `picker.py` — called on the picker keybind (`Alt+Space` by default, configurable during setup), shows fzf popup of all windows with agent status
 - `status.py` — status file I/O, flag files (`.error`, `.unseen`), stale cleanup
 - `process.py` — detects which panes have an interactive agent running (`kiro-cli chat` or `claude`) via ps tree walk
 - `tmux.py` — thin wrappers around tmux CLI commands

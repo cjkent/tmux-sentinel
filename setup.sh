@@ -299,8 +299,79 @@ tmux set -g status-interval 5 2>/dev/null && info "status-interval 5s" || warn "
 # status-right: run the status bar script every status-interval seconds.
 # The #() syntax tells tmux to execute the command and insert its output.
 tmux set -g status-right "#($REPO_DIR/bin/status_client.sh '#{pane_id}') %H:%M" 2>/dev/null && info "status-right configured" || warn "Could not set status-right"
-# Bind Ctrl+b a to open the agent picker popup
-tmux bind-key a display-popup -w 70% -h 50% -E "PYTHONPATH=$REPO_DIR python3 -S $REPO_DIR/tmux_sentinel/picker.py" 2>/dev/null && info "Ctrl+b a bound to agent picker" || warn "Could not bind key"
+
+# Picker keybind — interactive: accept the default, or pick a custom one.
+# Custom keys are entered in tmux's own notation (e.g. "a", "M-Space", "C-x")
+# rather than captured as raw keystrokes, since that's fragile across
+# terminals/encodings and tmux already validates its own notation for us.
+PICKER_CMD=(display-popup -w 70% -h 50% -E "PYTHONPATH=$REPO_DIR python3 -S $REPO_DIR/tmux_sentinel/picker.py")
+DEFAULT_KEY="M-Space"
+DEFAULT_PREFIXED=0
+
+echo -e "  Default keybind: ${BOLD}Alt/Meta + Space${NC} (standalone — no tmux prefix needed)"
+echo -n "  Use the default? [Y/n] "
+read -r answer
+
+KEY="" PREFIXED=""
+if [[ "${answer:-Y}" =~ ^[Nn]$ ]]; then
+    while true; do
+        echo "  Enter a tmux key (tmux.conf notation — see 'man tmux' KEY BINDINGS, e.g. a, M-Space, C-x):"
+        read -r -p "  Key: " KEY
+        [ -n "$KEY" ] || { warn "Key cannot be empty"; continue; }
+
+        echo -n "  Require your tmux prefix key first (vs. standalone)? [y/N] "
+        read -r pfx
+        if [[ "${pfx:-N}" =~ ^[Yy]$ ]]; then PREFIXED=1; else PREFIXED=0; fi
+
+        TABLE="prefix"; [ "$PREFIXED" -eq 0 ] && TABLE="root"
+        EXISTING=$(tmux list-keys -T "$TABLE" "$KEY" 2>/dev/null)
+        if [ -n "$EXISTING" ] && ! grep -q "tmux_sentinel" <<< "$EXISTING"; then
+            warn "'$KEY' in the $TABLE table is already bound to:"
+            echo "    $EXISTING"
+            echo -n "  Overwrite it? [y/N] "
+            read -r ow
+            [[ "${ow:-N}" =~ ^[Yy]$ ]] || continue
+        fi
+        break
+    done
+else
+    KEY="$DEFAULT_KEY"
+    PREFIXED="$DEFAULT_PREFIXED"
+fi
+
+if [ "$PREFIXED" -eq 1 ]; then
+    tmux bind-key "$KEY" "${PICKER_CMD[@]}" 2>/dev/null \
+        && info "prefix + $KEY bound to agent picker" \
+        || error "tmux rejected key '$KEY' — leaving picker unbound"
+else
+    tmux bind-key -n "$KEY" "${PICKER_CMD[@]}" 2>/dev/null \
+        && info "$KEY (standalone) bound to agent picker" \
+        || error "tmux rejected key '$KEY' — leaving picker unbound"
+fi
+
+echo -n "  Make this persist across tmux restarts (write to ~/.tmux.conf)? [Y/n] "
+read -r persist
+if [[ "${persist:-Y}" =~ ^[Yy]$ ]]; then
+    TMUX_CONF="$HOME/.tmux.conf"
+    MARKER="# tmux-sentinel: agent picker keybind"
+    if [ "$PREFIXED" -eq 1 ]; then
+        BIND_LINE="bind-key $KEY display-popup -w 70% -h 50% -E \"PYTHONPATH=$REPO_DIR python3 -S $REPO_DIR/tmux_sentinel/picker.py\""
+    else
+        BIND_LINE="bind -n $KEY display-popup -w 70% -h 50% -E \"PYTHONPATH=$REPO_DIR python3 -S $REPO_DIR/tmux_sentinel/picker.py\""
+    fi
+
+    if [ -f "$TMUX_CONF" ] && grep -qF "$MARKER" "$TMUX_CONF"; then
+        awk -v marker="$MARKER" -v newline="$BIND_LINE" '
+            $0 == marker { print; getline; print newline; next }
+            { print }
+        ' "$TMUX_CONF" > "$TMUX_CONF.tmp" && mv "$TMUX_CONF.tmp" "$TMUX_CONF"
+    else
+        { echo ""; echo "$MARKER"; echo "$BIND_LINE"; } >> "$TMUX_CONF"
+    fi
+    info "Keybind persisted to $TMUX_CONF"
+else
+    warn "Keybind is only active for this tmux server — it won't survive a tmux restart"
+fi
 
 step "Setup complete!"
 echo ""

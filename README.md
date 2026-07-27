@@ -9,7 +9,7 @@ Entirely vibe-coded using Claude Code. I haven't looked at the code and neither 
 When you run multiple AI agents (Kiro CLI or Claude Code) in separate tmux windows, tmux-sentinel gives you:
 
 - **Status tracking** — know which agents are working, idle, waiting for input, or errored, without switching to each window
-- **Window picker** (`Ctrl+b a`) — an fzf popup listing all windows across all sessions with agent status, working directory, git branch, and elapsed time
+- **Window picker** (`Alt+Space` by default, configurable during setup) — an fzf popup listing all windows across all sessions with agent status, working directory, git branch, and elapsed time
 - **Status bar summary** — a persistent indicator in `status-right` showing how many agents need attention
 - **Bell notifications** — window tabs highlight red when an agent finishes or needs input
 
@@ -61,7 +61,7 @@ Process detection uses a single `ps` snapshot + BFS tree walk from each pane's s
 
 ### Window Picker
 
-`tmux_sentinel/picker.py` is an fzf popup bound to `Ctrl+b a`. It:
+`tmux_sentinel/picker.py` is an fzf popup bound to a configurable key (`Alt+Space` by default). It:
 
 1. Cleans up stale status files
 2. Lists all windows across all tmux sessions
@@ -105,7 +105,7 @@ The setup script:
 4. Backs up the selected configs and injects hook entries for all 5 lifecycle events
 5. Removes any old bash hooks if present
 6. Offers to inject hooks into Claude Code settings (`~/.claude/settings.json`)
-7. Configures tmux: bell monitoring, status bar, `Ctrl+b a` keybinding
+7. Configures tmux: bell monitoring, status bar, and the picker keybinding (default `Alt+Space`, standalone — no tmux prefix needed; you can accept the default or choose your own during setup)
 
 To remove hooks from agent configs:
 
