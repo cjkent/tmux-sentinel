@@ -17,7 +17,6 @@ from __future__ import annotations
 import json
 import os
 import re
-import subprocess
 import sys
 import time
 from pathlib import Path
@@ -29,20 +28,51 @@ from tmux_sentinel.status import (
 )
 
 
+def _read_head_branch(git_dir: str) -> str:
+    """Return the branch name from a git dir's HEAD file, or '' if detached."""
+    try:
+        with open(os.path.join(git_dir, "HEAD"), "r") as f:
+            head = f.read().strip()
+    except OSError:
+        return ""
+    # "ref: refs/heads/<branch>" on a branch; a bare SHA when detached.
+    prefix = "ref: refs/heads/"
+    return head[len(prefix):] if head.startswith(prefix) else ""
+
+
 def _get_git_branch(cwd: str) -> str:
-    """Detect the current git branch for a directory."""
+    """Detect the current git branch for a directory.
+
+    Reads .git/HEAD directly instead of spawning `git` — the subprocess costs
+    ~20ms per call, which dominated picker latency when several panes needed a
+    lookup. Walks up to the repo root like the git CLI does, and follows the
+    "gitdir: ..." pointer used by worktrees and submodules (where .git is a
+    file, not a directory).
+    """
     if not cwd or not os.path.isdir(cwd):
         return ""
-    try:
-        result = subprocess.run(
-            ["git", "-C", cwd, "branch", "--show-current"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        return result.stdout.strip() if result.returncode == 0 else ""
-    except (subprocess.TimeoutExpired, FileNotFoundError):
-        return ""
+    d = os.path.abspath(cwd)
+    while True:
+        dot_git = os.path.join(d, ".git")
+        if os.path.isdir(dot_git):
+            return _read_head_branch(dot_git)
+        if os.path.isfile(dot_git):
+            # Worktree/submodule: ".git" is a file containing "gitdir: <path>".
+            try:
+                with open(dot_git, "r") as f:
+                    line = f.read().strip()
+            except OSError:
+                return ""
+            if line.startswith("gitdir: "):
+                git_dir = line[len("gitdir: "):]
+                if not os.path.isabs(git_dir):
+                    git_dir = os.path.join(d, git_dir)
+                return _read_head_branch(git_dir)
+            return ""
+        parent = os.path.dirname(d)
+        if parent == d:  # reached filesystem root, no repo found
+            return ""
+        d = parent
 
 
 _EVENT_ALIASES = {

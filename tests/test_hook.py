@@ -1,4 +1,5 @@
 """Tests for tmux_sentinel.hook module."""
+import os
 import tempfile
 from pathlib import Path
 
@@ -6,7 +7,7 @@ from tmux_sentinel.status import (
     IDLE, WORKING, WAITING, ERROR,
     read_status, has_error_flag, is_unseen,
 )
-from tmux_sentinel.hook import handle_event
+from tmux_sentinel.hook import handle_event, _get_git_branch
 
 _test_dir = None
 
@@ -159,6 +160,62 @@ def test_cc_hookEventName_field():
     s = _read()
     assert s is not None
     assert s.status == IDLE
+
+
+# --- _get_git_branch: reads .git/HEAD directly (no `git` subprocess) ---
+
+def _make_repo(root: Path, head_content: str, as_worktree_pointer: bool = False):
+    """Create a fake repo layout under root. Returns the repo dir path."""
+    if as_worktree_pointer:
+        # .git is a FILE pointing at the real git dir (worktree/submodule case)
+        real_git = root / "realgit"
+        real_git.mkdir(parents=True)
+        (real_git / "HEAD").write_text(head_content)
+        (root / ".git").write_text(f"gitdir: {real_git}\n")
+    else:
+        git_dir = root / ".git"
+        git_dir.mkdir(parents=True)
+        (git_dir / "HEAD").write_text(head_content)
+    return root
+
+
+def test_git_branch_on_branch():
+    root = Path(tempfile.mkdtemp())
+    _make_repo(root, "ref: refs/heads/main\n")
+    assert _get_git_branch(str(root)) == "main"
+
+
+def test_git_branch_from_subdirectory():
+    # Walks up to the repo root, like the git CLI.
+    root = Path(tempfile.mkdtemp())
+    _make_repo(root, "ref: refs/heads/feature/x\n")
+    sub = root / "src" / "pkg"
+    sub.mkdir(parents=True)
+    assert _get_git_branch(str(sub)) == "feature/x"
+
+
+def test_git_branch_detached_head():
+    # Detached HEAD stores a bare SHA — no branch name.
+    root = Path(tempfile.mkdtemp())
+    _make_repo(root, "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0\n")
+    assert _get_git_branch(str(root)) == ""
+
+
+def test_git_branch_worktree_pointer():
+    # .git is a file "gitdir: <path>" rather than a directory.
+    root = Path(tempfile.mkdtemp())
+    _make_repo(root, "ref: refs/heads/release\n", as_worktree_pointer=True)
+    assert _get_git_branch(str(root)) == "release"
+
+
+def test_git_branch_not_a_repo():
+    root = Path(tempfile.mkdtemp())  # no .git anywhere up to fs root
+    assert _get_git_branch(str(root)) == ""
+
+
+def test_git_branch_nonexistent_dir():
+    assert _get_git_branch("/no/such/dir/exists/here") == ""
+    assert _get_git_branch("") == ""
 
 
 if __name__ == "__main__":
