@@ -45,7 +45,7 @@ Each agent pane gets a JSON file at `~/.tmux-sentinel/status/<pane-id>.json`:
 }
 ```
 
-One file per pane, no shared state, no concurrency issues. Written atomically via temp file + rename.
+One file per pane, written atomically via temp file + rename.
 
 Additional flag files per pane:
 - `.error` — set when a tool fails, cleared on stop
@@ -141,7 +141,7 @@ tmux-sentinel/
 
 ## Dependencies
 
-- **Python 3.8+** — ships with macOS, available on Linux. Stdlib only, no pip packages.
+- **Python 3.8+** — stdlib only, no pip packages.
 - **fzf** — fuzzy finder, used for the window picker popup.
 - **jq** — used by `setup.sh` for agent config manipulation.
 - **tmux** — obviously.
