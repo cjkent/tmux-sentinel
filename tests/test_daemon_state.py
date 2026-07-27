@@ -122,6 +122,47 @@ def test_mark_seen():
     print("  ✓ test_mark_seen")
 
 
+def test_new_turn_clears_unseen():
+    # Regression: unseen is set on stop and only cleared by focus/agentSpawn.
+    # Starting a new turn (UserPromptSubmit) must also clear it — otherwise the
+    # pane shows WORKING + a stale "unseen" red dot at the same time, which is
+    # contradictory (nothing has finished-and-gone-unlooked-at if it's working).
+    state = DaemonState()
+    state.apply_hook_event(
+        {"hookEventName": "UserPromptSubmit", "cwd": "/tmp"},
+        pane_id="100",
+    )
+    state.apply_hook_event(
+        {"hookEventName": "Stop", "cwd": "/tmp", "assistant_response": "Done."},
+        pane_id="100",
+    )
+    assert state.get("100").unseen is True
+
+    state.apply_hook_event(
+        {"hookEventName": "UserPromptSubmit", "cwd": "/tmp"},
+        pane_id="100",
+    )
+    ps = state.get("100")
+    assert ps.status == WORKING
+    assert ps.unseen is False
+    print("  ✓ test_new_turn_clears_unseen")
+
+
+def test_pre_tool_use_clears_unseen():
+    # A PreToolUse arriving while unseen is set (e.g. a follow-up turn that
+    # went straight to a tool call) must also clear the stale dot.
+    state = DaemonState()
+    ps = state.ensure("100")
+    ps.status = WORKING
+    ps.unseen = True
+    state.apply_hook_event(
+        {"hookEventName": "PreToolUse", "cwd": "/tmp"},
+        pane_id="100",
+    )
+    assert state.get("100").unseen is False
+    print("  ✓ test_pre_tool_use_clears_unseen")
+
+
 def test_any_working():
     state = DaemonState()
     assert state.any_working() is False
@@ -167,6 +208,8 @@ if __name__ == "__main__":
     test_apply_stop_waiting()
     test_apply_stop_error()
     test_pre_tool_use_preserves_timestamp()
+    test_new_turn_clears_unseen()
+    test_pre_tool_use_clears_unseen()
     test_mark_seen()
     test_any_working()
     test_remove_pane()

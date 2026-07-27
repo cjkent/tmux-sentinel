@@ -80,11 +80,16 @@ class DaemonState:
             ps.cwd = cwd
             ps.git_branch = _get_git_branch(cwd)
             ps.timestamp = now
+            # A new turn is starting, so any prior "finished but unseen" result
+            # is now moot — and you're clearly at the pane if you're prompting
+            # it. Leaving unseen set would show WRK + a red dot together.
+            ps.unseen = False
 
         elif event_name == "preToolUse":
             ps.status = WORKING
             if cwd:
                 ps.cwd = cwd
+            ps.unseen = False
 
         elif event_name == "postToolUse":
             tool_response = event.get("tool_response", {})

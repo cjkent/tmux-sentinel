@@ -91,6 +91,8 @@ def run_poll(state: DaemonState) -> None:
                 ps.unseen = True
             elif actual is None and ps.status == WAITING:
                 ps.status = WORKING
+                # Back to working means no completed-and-unseen result stands.
+                ps.unseen = False
 
     if state.focused_pane:
         state.mark_seen(state.focused_pane)
