@@ -65,7 +65,9 @@ def test_build_rows_unseen_marker():
     write_status("99990", IDLE, "/tmp", "", 1000, status_dir=d)
     set_unseen("99990", status_dir=d)
     rows, _ = _rows(d, [_make_pane()])
-    assert "●" in rows[1][2]
+    # The unseen dot now leads the row in the shared marker column (col 0),
+    # not trailing the status label.
+    assert rows[1][0].startswith("●")
 
 
 def test_build_rows_seen_no_marker():
@@ -73,11 +75,22 @@ def test_build_rows_seen_no_marker():
     write_status("99990", IDLE, "/tmp", "", 1000, status_dir=d)
     # No unseen flag
     rows, _ = _rows(d, [_make_pane()])
-    assert "●" not in rows[1][2]
+    assert "●" not in rows[1][0]
+
+
+def test_build_rows_current_window_not_unseen_marker():
+    # The current window shares the marker column with the unseen dot, but ►
+    # must win — a current window is by definition seen, so it never shows ●.
+    d = _setup()
+    write_status("99990", IDLE, "/tmp", "", 1000, status_dir=d)
+    set_unseen("99990", status_dir=d)
+    rows, _ = _rows(d, [_make_pane()], "test", "0")
+    assert rows[1][0].startswith("►")
+    assert "●" not in rows[1][0]
 
 
 def test_colorize_line():
-    line = "  0: zsh  [IDL]  ●  ~/dev  (main)"
+    line = "● 0: zsh  [IDL]  ~/dev  (main)"
     result = _colorize_line(line)
     assert "\033[32m[IDL]\033[0m" in result
     assert "\033[31m●\033[0m" in result
@@ -137,7 +150,8 @@ def test_daemon_state_unseen_marker():
     ds = {"99990": {"status": IDLE, "cwd": "/tmp", "git_branch": "",
                     "timestamp": 1000, "unseen": True, "agent_type": "claude"}}
     rows, _ = _rows_daemon(d, [_make_pane()], ds)
-    assert "●" in rows[1][2]
+    # Unseen dot now leads the row in the shared marker column (col 0).
+    assert rows[1][0].startswith("●")
 
 
 def test_generate_list_from_daemon_calls_cleanup_stale():

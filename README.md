@@ -69,8 +69,8 @@ Process detection uses a single `ps` snapshot + BFS tree walk from each pane's s
 4. Aligns columns using Python string formatting (no external `column` command)
 5. Colorizes status labels with ANSI codes: green=idle, yellow=working, purple=waiting, red=error
 6. Groups windows under session headers
-7. Marks the current window with `►`
-8. Shows a red `●` dot next to windows with unseen status changes
+7. Marks the current window with `►` in a leading marker column
+8. Shows a red `●` dot in that same marker column for windows with unseen status changes (the current window is always seen, so the two never clash — keeping "where am I" and "what needs attention" vertically aligned)
 9. On selection, switches to that session and window
 
 Elapsed time is shown only for working agents — it reflects time since the user's last prompt, useful for spotting stuck agents.

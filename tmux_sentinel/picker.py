@@ -167,6 +167,7 @@ def _build_rows(
         for p in sessions[session]:
             agent_icon = _AGENT_ICONS.get(at.get(p.pane_id, ""), "  ")
             is_current = (p.session == cur_session and p.window_index == cur_window)
+            unseen = False
             daemon_pane = ds.get(p.pane_id)
             if daemon_pane is not None:
                 # Fast path: daemon supplies status/unseen/timestamp (no capture-pane).
@@ -176,7 +177,7 @@ def _build_rows(
                 display_status = daemon_pane["status"]
                 icon = status_label(display_status)
                 unseen = daemon_pane.get("unseen", False)
-                icon_display = f"{icon} ●" if unseen else f"{icon}  "
+                icon_display = icon
                 el = elapsed(daemon_pane["timestamp"]) if display_status == WORKING else ""
                 file_status = read_status(p.pane_id, status_dir=sd)
                 if file_status:
@@ -198,12 +199,12 @@ def _build_rows(
                 # Agents detected as waiting for approval are "unseen" unless it's the current window
                 if display_status == WAITING and status.status == WORKING and not is_current:
                     unseen = True
-                icon_display = f"{icon} ●" if unseen else f"{icon}  "
+                icon_display = icon
                 el = elapsed(status.timestamp) if display_status == WORKING else ""
                 cwd = status.cwd
                 branch = f"({status.git_branch})" if status.git_branch else ""
             else:
-                icon_display = "[---]  "
+                icon_display = "[---]"
                 agent_icon = "  "
                 el = ""
                 cwd = p.pane_current_path
@@ -211,7 +212,16 @@ def _build_rows(
                 branch = f"({git_branch})" if git_branch else ""
 
             short_cwd = _shorten_path(cwd, home, home_symlinks)
-            marker = "► " if (p.session == cur_session and p.window_index == cur_window) else "  "
+            # The leading marker column is shared: a current window shows ►, an
+            # unseen (finished-but-unviewed) window shows ●. These never clash —
+            # the current window is always seen — so they occupy one column,
+            # keeping "where am I" and "what needs attention" vertically aligned.
+            if is_current:
+                marker = "► "
+            elif unseen:
+                marker = "● "
+            else:
+                marker = "  "
             name = _display_name(p, at.get(p.pane_id, ""))
 
             rows.append([
@@ -239,7 +249,9 @@ def _colorize_line(line: str) -> str:
         ("[WRK]", "\033[34m[WRK]\033[0m"),
         ("[WAI]", "\033[35m[WAI]\033[0m"),
         ("[ERR]", "\033[31m[ERR]\033[0m"),
-        (" ●", f" {RED}●{RESET}"),
+        # The unseen dot now leads the row (in the shared marker column) rather
+        # than trailing the status label, so match it at the start of the line.
+        ("● ", f"{RED}●{RESET} "),
     ]
     for old, new in replacements:
         line = line.replace(old, new)
