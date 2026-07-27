@@ -1,6 +1,8 @@
 # tmux-sentinel
 
-A tmux-native tool for monitoring and switching between multiple AI agent sessions. It tracks agent status via lifecycle hooks (Kiro CLI and Claude Code) and surfaces that information through a window picker, status bar, and bell notifications — all within tmux.
+A tmux-native tool for monitoring and switching between multiple AI agent sessions. It tracks agent status via lifecycle hooks (Kiro CLI and Claude Code) and surfaces that information through a window picker, status bar, and bell notifications.
+
+Entirely vibe-coded using Claude Code. I haven't looked at the code and neither should you. Use at your own risk. Works on my machine ;)
 
 ## What It Does
 
