@@ -382,6 +382,17 @@ def main() -> None:
     fzf_input = _generate_list()
     sep = "\x1f"
 
+    # Position the fzf cursor on the current window at launch, so "where am I"
+    # is answered the instant the popup opens (and it's the natural point to
+    # navigate away from). The current row is the only one carrying ►; its
+    # 1-based line index is the fzf item position. With --reverse + --no-sort
+    # the input order is the display order, so the index maps directly.
+    current_pos = 0
+    for i, line in enumerate(fzf_input.splitlines(), start=1):
+        if "►" in line:
+            current_pos = i
+            break
+
     # Build the reload and close commands for fzf.
     # -S skips Python's site-init (no pip deps here, so it's safe) — trims a
     # few ms of interpreter startup per invocation by skipping Homebrew's
@@ -390,23 +401,32 @@ def main() -> None:
     close_cmd = f"{script} --close {{2}}"
     reload_cmd = f"{script} --list"
 
+    fzf_args = [
+        "fzf",
+        "--ansi",
+        "--no-sort",
+        "--reverse",
+        "--prompt=Switch to > ",
+        "--header=ctrl-x: close window/session",
+        "--no-info",
+        "--no-multi",
+        "--cycle",
+        f"--delimiter={sep}",
+        "--with-nth=1",
+        "--bind", f"ctrl-x:execute-silent({close_cmd})+reload({reload_cmd})",
+    ]
+    # Place the cursor on the current window at startup. Bind to `load`, not
+    # `start`: with input piped over stdin, `start` fires before fzf has
+    # finished reading the list, so pos() would land in an empty buffer and
+    # leave the cursor at the top. `load` fires once the input is fully read.
+    # pos(N) is 1-based; only bind when we found the current row (pos(0) is invalid).
+    if current_pos:
+        fzf_args += ["--bind", f"load:pos({current_pos})"]
+
     # Run fzf
     try:
         result = subprocess.run(
-            [
-                "fzf",
-                "--ansi",
-                "--no-sort",
-                "--reverse",
-                "--prompt=Switch to > ",
-                "--header=ctrl-x: close window/session",
-                "--no-info",
-                "--no-multi",
-                "--cycle",
-                f"--delimiter={sep}",
-                "--with-nth=1",
-                "--bind", f"ctrl-x:execute-silent({close_cmd})+reload({reload_cmd})",
-            ],
+            fzf_args,
             input=fzf_input,
             capture_output=True,
             text=True,
