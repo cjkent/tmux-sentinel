@@ -29,5 +29,5 @@ pattern = '''ask a question or describe a task'''
 # and never shows when idle.
 [[rule]]
 state = "idle"
-pattern = '''shift\+tab to cycle|\? for shortcuts'''
+pattern = '''shift\+tab to cycle|\? for shortcuts|manual mode on'''
 exclude = '''esc to interrupt|\(\d+[hms]'''
