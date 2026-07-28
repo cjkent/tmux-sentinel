@@ -9,7 +9,11 @@ popup.
 - **No headers anywhere.** Grouping becomes a *sort*, not a layout. Every row is a
   real fzf target (so `session waiting` narrows correctly).
 - **Session is always a column** — preserves searchability.
-- **Three modes:** `unseen` (default), `by-session`, `mru`.
+- **Three modes:** `unseen` (default), `session`, `mru`.
+- **Primary interaction is three per-mode launch keybinds** (one tmux bind per
+  mode; specific keys chosen at build time). In-popup mode switching is a
+  nice-to-have, not the main path — which lets us drop the cursor-recompute
+  machinery (see §5).
 - **Current window included in all three modes.** Its `►` is a passive "you are
   here" anchor.
 - **Cursor is per-mode** (§5). MRU follows option C: current at top, cursor parked
@@ -42,12 +46,12 @@ idle=3, none=4), `activity` (`#{window_activity}`), `session_order_index`,
 `window_index`.
 
 ```
-unseen     : (not unseen, severity, -activity)     # dots on top, then triage
-by-session : (session_order_index, window_index)   # exactly today's grouped order
-mru        : (-activity)                            # most-recently-used first
+unseen  : (not unseen, severity, -activity)     # dots on top, then triage
+session : (session_order_index, window_index)   # exactly today's grouped order
+mru     : (-activity)                            # most-recently-used first
 ```
 
-`by-session` reproduces the current ordering precisely — nothing lost by dropping
+`session` reproduces the current ordering precisely — nothing lost by dropping
 headers.
 
 ## 3. `window_activity` plumbing (`tmux.py`)
@@ -55,36 +59,48 @@ Add `#{window_activity}` to `list_panes`'s format string + an `activity: int` fi
 on `PaneInfo`. Only cross-the-board recency signal — works for agent *and* plain
 panes (the daemon only has timestamps for agent panes). ~3 lines.
 
-## 4. `--mode` arg + live switching (`main`, `_generate_list`)
+## 4. `--mode` arg + launch keybinds (`main`, `_generate_list`)
 - Thread `mode` through `_generate_list(mode)` → daemon/direct → `_build_rows`.
   Default `"unseen"`.
-- `--list` grows `--mode=X`.
-- Stateless keybinds (mode lives in each reload string):
+- `main()` grows a launch `--mode=X` arg; `--list` grows `--mode=X` too.
+- **Primary path — three tmux keybinds, one per mode** (keys TBD at build time):
   ```
-  ctrl-u : reload(… --list --mode=unseen)     + change-prompt(unseen > )
-  ctrl-g : reload(… --list --mode=by-session) + change-prompt(session > )
-  ctrl-r : reload(… --list --mode=mru)        + change-prompt(recent > )
+  <key1> : picker.py --mode=unseen    (primary triage)
+  <key2> : picker.py --mode=session
+  <key3> : picker.py --mode=mru
+  ```
+  Each launch renders its mode with the correct cursor via the plain launch path
+  (§5) — no reload involved.
+- **Nice-to-have — in-popup switching** via stateless fzf keybinds (mode lives in
+  each reload string). Cursor lands at top-of-list after an in-popup switch (no
+  recompute — see §5); acceptable since this isn't the primary path:
+  ```
+  ctrl-u : reload(… --list --mode=unseen)  + change-prompt(unseen > )
+  ctrl-g : reload(… --list --mode=session) + change-prompt(session > )
+  ctrl-r : reload(… --list --mode=mru)     + change-prompt(recent > )
   ```
   `--header` lists the three keys. (ctrl-u/g/r aren't fzf defaults; easy to retune.)
 
-## 5. Cursor position (per-mode, correct at launch *and* after reload)
-Targets:
-- `by-session` → **current window** (the `►` row)
+## 5. Cursor position (per-mode, correct at launch)
+Because the primary path is three per-mode *launches* (§4), the cursor only needs to
+be correct **at launch** — the fiddly post-reload recompute is dropped. Targets:
+- `session` → **current window** (the `►` row)
 - `unseen` → **first unseen** row (fall back to current window if none)
 - `mru` → **row after the current window** (option C: current sits at top with `►`,
   cursor parks on the first switchable target below it)
 
 Mechanism:
-- **Launch:** add fzf `--sync` and bind `start:pos(N)` (not `load`). `--sync` holds
-  the UI until the initial list is read, so `start` fires *after* the buffer is
-  populated (fixing the old empty-buffer bug) and fires **only** at startup — never
-  on reload.
-- **Mode switch:** use fzf `transform` so each reload carries its own freshly-computed
-  `pos(M)`, via a cheap `picker.py --cursor-row --mode=X` (one sub-ms daemon dump).
-  Correct for the list being loaded.
+- **Launch:** compute the target row in `main()` and bind `start:pos(N)` with fzf
+  `--sync`. `--sync` holds the UI until the initial list is read, so `start` fires
+  *after* the buffer is populated (fixing the old empty-buffer bug that forced
+  `load` before) and fires only at startup.
+- **In-popup switch (nice-to-have):** no recompute — cursor lands at top of the new
+  list. The `transform`/`--cursor-row` machinery from the earlier draft is
+  **dropped** (in-popup switching isn't the primary path, so top-of-list is fine).
 - **Caveat to verify during build** (not asserted now): confirm `--sync` +
   `start:pos(N)` behaves as documented on fzf 0.74 via a 5-second scripted test.
-  Fallback: compute position via `transform` on a `load` guard.
+  Fallback: keep `load:pos(N)` (works today; the earlier empty-buffer issue only bit
+  with the old bind ordering).
 
 The MRU cursor is just "find the `►` row, +1" — same computation the other modes
 already need. No list filtering special-cased into `_build_rows`.
