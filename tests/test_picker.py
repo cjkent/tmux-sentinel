@@ -40,7 +40,8 @@ def test_build_rows_with_agent():
     rows, targets = _rows(d, [_make_pane()], "test", "0")
     assert len(rows) == 2
     assert targets[0] == "test:"
-    assert targets[1] == "test:0"
+    # Targets are pane ids, so split panes are individually selectable.
+    assert targets[1] == "99990"
     assert "[WRK]" in rows[1][2]
 
 
@@ -87,6 +88,52 @@ def test_build_rows_current_window_not_unseen_marker():
     rows, _ = _rows(d, [_make_pane()], "test", "0")
     assert rows[1][0].startswith("►")
     assert "●" not in rows[1][0]
+
+
+def _rows_focused(d, panes, focused_pane, cur_session="test", cur_window="0"):
+    """Build rows with an explicit focused pane id (split-window aware)."""
+    import tmux_sentinel.picker as pm
+    orig = pm.list_sessions
+    pm.list_sessions = lambda: sorted({p.session for p in panes})
+    try:
+        return _build_rows(
+            panes, cur_session, cur_window, status_dir=d, focused_pane=focused_pane
+        )
+    finally:
+        pm.list_sessions = orig
+
+
+def test_split_panes_get_distinct_targets():
+    # Two panes in the SAME window: a window-level target ("session:window") can't
+    # tell them apart, so selecting either one used to leave focus wherever it was.
+    d = _setup()
+    panes = [
+        _make_pane(pane_id="99990", window_index="0"),
+        _make_pane(pane_id="99991", window_index="0"),
+    ]
+    _, targets = _rows_focused(d, panes, focused_pane="99990")
+    assert targets[1] == "99990"
+    assert targets[2] == "99991"
+    assert targets[1] != targets[2]
+
+
+def test_split_panes_only_focused_pane_is_current():
+    # Both panes share session+window, so only the focused pane id may carry ►.
+    d = _setup()
+    panes = [
+        _make_pane(pane_id="99990", window_index="0"),
+        _make_pane(pane_id="99991", window_index="0"),
+    ]
+    rows, _ = _rows_focused(d, panes, focused_pane="99991")
+    assert not rows[1][0].startswith("►")
+    assert rows[2][0].startswith("►")
+
+
+def test_current_marker_falls_back_to_window_without_focused_pane():
+    # With no focused_pane supplied, fall back to session+window matching.
+    d = _setup()
+    rows, _ = _rows(d, [_make_pane()], "test", "0")
+    assert rows[1][0].startswith("►")
 
 
 def test_colorize_line():

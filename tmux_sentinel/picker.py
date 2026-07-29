@@ -39,7 +39,8 @@ from tmux_sentinel.hook import _get_git_branch
 from tmux_sentinel.process import get_kiro_panes, get_agent_types
 from tmux_sentinel.tmux import (
     list_panes, list_sessions, pane_pids,
-    current_session, current_window_index, current_session_window, switch_to, PaneInfo,
+    current_session, current_window_index, current_session_window,
+    current_session_window_pane, switch_to_pane, kill_pane, focused_pane_id, PaneInfo,
 )
 from tmux_sentinel.formatting import (
     elapsed, status_label, colorize_status, align_columns,
@@ -123,6 +124,7 @@ def _build_rows(
     git_branches: dict[str, str] = None,
     daemon_state: dict = None,
     session_order: list[str] = None,
+    focused_pane: str = "",
 ) -> tuple[list[list[str]], list[str]]:
     """
     Build display rows and corresponding targets for the picker.
@@ -135,9 +137,13 @@ def _build_rows(
     session_order gives the display order of sessions; if omitted it is fetched
     via list_sessions() (callers that already have it can pass it to save a call).
 
+    focused_pane is the pane id (no %) of the focused pane. When given, the ►
+    marker identifies that exact pane rather than every pane in the current
+    window — a split window has several panes but only one is focused.
+
     Returns:
         (rows, targets) where rows[i] is a list of column values and
-        targets[i] is "session:window" or "" for session headers.
+        targets[i] is a pane id (no %) or "" for session headers.
     """
     from tmux_sentinel.status import STATUS_DIR as DEFAULT_DIR
     sd = status_dir or DEFAULT_DIR
@@ -166,7 +172,12 @@ def _build_rows(
 
         for p in sessions[session]:
             agent_icon = _AGENT_ICONS.get(at.get(p.pane_id, ""), "  ")
-            is_current = (p.session == cur_session and p.window_index == cur_window)
+            # Prefer the focused pane id: in a split window, matching on
+            # session+window alone would mark every pane of that window as current.
+            if focused_pane:
+                is_current = (p.pane_id == focused_pane)
+            else:
+                is_current = (p.session == cur_session and p.window_index == cur_window)
             unseen = False
             daemon_pane = ds.get(p.pane_id)
             if daemon_pane is not None:
@@ -232,7 +243,10 @@ def _build_rows(
                 branch,
                 el,
             ])
-            targets.append(f"{p.session}:{p.window_index}")
+            # Target the pane, not "session:window": split panes share a window
+            # index, so a window-level target can't distinguish them and tmux
+            # would keep focus on whichever pane last had it.
+            targets.append(p.pane_id)
 
     return rows, targets
 
@@ -293,7 +307,7 @@ def _generate_list_from_daemon(daemon_state: dict) -> str:
     with ThreadPoolExecutor() as ex:
         panes_fut = ex.submit(list_panes)
         sessions_fut = ex.submit(list_sessions)
-        cur_fut = ex.submit(current_session_window)
+        cur_fut = ex.submit(current_session_window_pane)
 
         panes = panes_fut.result()
 
@@ -304,7 +318,7 @@ def _generate_list_from_daemon(daemon_state: dict) -> str:
             for p in panes
             if p.pane_id not in daemon_state and p.pane_current_path
         }
-        cur_sess, cur_win = cur_fut.result()
+        cur_sess, cur_win, cur_pane = cur_fut.result()
         session_order = sessions_fut.result()
         git_branches = {pid: fut.result() for pid, fut in git_futs.items()}
 
@@ -314,7 +328,7 @@ def _generate_list_from_daemon(daemon_state: dict) -> str:
     rows, targets = _build_rows(
         panes, cur_sess, cur_win,
         agent_types=agent_types, git_branches=git_branches, daemon_state=daemon_state,
-        session_order=session_order,
+        session_order=session_order, focused_pane=cur_pane,
     )
     return _render(rows, targets)
 
@@ -344,11 +358,13 @@ def _generate_list_direct() -> str:
 
     pane_paths = {p.pane_id: p.pane_current_path for p in panes}
     recreate_missing(live_kiro, pane_paths)
-    cur_sess = current_session()
-    cur_win = current_window_index()
+    cur_sess, cur_win, cur_pane = current_session_window_pane()
     agent_types = get_agent_types(pp, process_tree=tree)
 
-    rows, targets = _build_rows(panes, cur_sess, cur_win, agent_types=agent_types, git_branches=git_branches)
+    rows, targets = _build_rows(
+        panes, cur_sess, cur_win, agent_types=agent_types,
+        git_branches=git_branches, focused_pane=cur_pane,
+    )
     return _render(rows, targets)
 
 
@@ -366,17 +382,13 @@ def main() -> None:
         sys.stdout.write(_generate_list())
         return
 
-    # --close mode: kill a window or session (used by fzf ctrl-x)
+    # --close mode: kill the selected pane (used by fzf ctrl-x). Targets are pane
+    # ids now, so this closes exactly the pane on the highlighted row; tmux closes
+    # the window itself once its last pane is gone.
     if len(sys.argv) > 1 and sys.argv[1] == "--close":
         target = sys.argv[2] if len(sys.argv) > 2 else ""
-        if ":" in target:
-            session, window = target.split(":", 1)
-            if window:
-                subprocess.run(["tmux", "kill-window", "-t", f"{session}:{window}"],
-                               capture_output=True)
-            else:
-                subprocess.run(["tmux", "kill-session", "-t", session],
-                               capture_output=True)
+        if target and target.isdigit():
+            kill_pane(target)
         return
 
     fzf_input = _generate_list()
@@ -407,7 +419,7 @@ def main() -> None:
         "--no-sort",
         "--reverse",
         "--prompt=Switch to > ",
-        "--header=ctrl-x: close window/session",
+        "--header=ctrl-x: close pane",
         "--no-info",
         "--no-multi",
         "--cycle",
@@ -438,13 +450,12 @@ def main() -> None:
     if result.returncode != 0 or not result.stdout.strip():
         return
 
-    # Extract target from selection
+    # Extract target from selection. Targets are pane ids (session headers carry
+    # an empty target, so they select nothing).
     selection = result.stdout.strip()
     target = selection.split(sep)[-1] if sep in selection else ""
-    if ":" in target:
-        session, window = target.split(":", 1)
-        if window:
-            switch_to(session, window)
+    if target and target.isdigit():
+        switch_to_pane(target)
 
 
 if __name__ == "__main__":

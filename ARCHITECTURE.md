@@ -115,7 +115,8 @@ Thin wrappers around `tmux` CLI commands. Each function runs `subprocess.run(["t
 Key functions:
 - `list_panes()` → all panes with metadata (ID, PID, session, window, current path)
 - `focused_pane_id()` → which pane the user is looking at
-- `switch_to(session, window)` → switch client and select window
+- `switch_to_pane(pane_id)` → switch client, select window, and focus that exact pane
+- `kill_pane(pane_id)` → kill one pane (tmux closes the window with its last pane)
 - `pane_pids()` → `{pane_id: pane_pid}` mapping for process detection
 - `capture_pane_tail(pane_id, lines)` → last N non-empty lines of visible content
 

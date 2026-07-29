@@ -84,10 +84,42 @@ def current_session_window() -> tuple[str, str]:
     return output, ""
 
 
-def switch_to(session: str, window: str) -> None:
-    """Switch the client to the given session and window."""
-    _run_tmux("switch-client", "-t", session)
-    _run_tmux("select-window", "-t", f"{session}:{window}")
+def current_session_window_pane() -> tuple[str, str, str]:
+    """Return (session_name, window_index, pane_id) for the client, in one call.
+
+    The pane id (without %) identifies the focused pane, which the picker needs to
+    mark the current row precisely — a split window has several panes, and only one
+    of them is focused.
+    """
+    output = _run_tmux(
+        "display-message", "-p", "#{session_name}|#{window_index}|#{pane_id}"
+    )
+    parts = output.split("|")
+    if len(parts) == 3:
+        return parts[0], parts[1], parts[2].lstrip("%")
+    return output, "", ""
+
+
+def switch_to_pane(pane_id: str) -> None:
+    """Focus a specific pane, switching session and window as needed.
+
+    Targets the pane by its id rather than "session:window": pane ids are globally
+    unique and stable, so this survives window renumbering between the popup being
+    drawn and the selection being made. Selecting the window alone would leave the
+    focus on whichever pane of that window last had it — which is exactly the bug
+    this replaces.
+    """
+    target = f"%{pane_id}"
+    session = _run_tmux("display-message", "-p", "-t", target, "#{session_name}")
+    if session:
+        _run_tmux("switch-client", "-t", session)
+    _run_tmux("select-window", "-t", target)
+    _run_tmux("select-pane", "-t", target)
+
+
+def kill_pane(pane_id: str) -> None:
+    """Kill a single pane (tmux closes the window when its last pane goes)."""
+    _run_tmux("kill-pane", "-t", f"%{pane_id}")
 
 
 def pane_pids() -> dict[str, str]:
