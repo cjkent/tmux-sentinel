@@ -39,6 +39,17 @@ flattened to columns. Column order — marker, session, name, rest:
 - `_MAX_TITLE_LEN`: 40 → 28. New 20-char session truncation.
 - Daemon/file/no-agent branches unchanged in logic — they populate a record instead
   of appending columns inline.
+- **Already landed (`ef89d1d`), inherited by this work — do not re-derive:**
+  - **Targets are pane ids** (no `%`), not `session:window` — split panes are
+    individually selectable. Selection calls `switch_to_pane(pane_id)`; the row
+    model carries `pane_id` as its target unchanged.
+  - **`is_current` keys off the focused pane id** (`_build_rows(..., focused_pane=)`,
+    fed by `current_session_window_pane()`), not session+window — so exactly one row
+    carries `►` even in a split window. The per-mode cursor logic in §5 depends on
+    that uniqueness (it locates the single `►` row).
+  - Rows are already **pane-level**, not window-level: a split window contributes one
+    row per pane. Sorting in §2 therefore orders *panes*; `window_index` is a sort
+    key, not an identity.
 
 ## 2. Sorting (mode-driven)
 Each record carries: `unseen` (bool), `severity` (waiting=0, error=1, working=2,
@@ -113,12 +124,22 @@ already need. No list filtering special-cased into `_build_rows`.
 - `test_picker.py`: rewrite row-shape assertions (no header rows; marker=col 0,
   session=col 1). Add one test per mode asserting order (unseen-on-top, session
   grouping, mru by activity). Update `_colorize_line` sample lines.
+  - Keep the existing split-pane tests from `ef89d1d`
+    (`test_split_panes_get_distinct_targets`,
+    `test_split_panes_only_focused_pane_is_current`,
+    `test_current_marker_falls_back_to_window_without_focused_pane`) — they guard the
+    single-`►` invariant the §5 cursor logic relies on. Their target assertions use
+    pane ids, so they survive the row-model refactor; only row-index expectations may
+    shift once header rows are gone.
 - `test_formatting.py`: `align_columns` is generic — existing tests should pass; add
   a truncation check if truncation lands in a shared helper.
 
 ## Consequences folded in
-- `ctrl-x` now only kills the window under the cursor; `--header` hint drops
-  "/session." (Session-kill dropped — use tmux commands or tmux-palette for that
-  rare case.)
+- `ctrl-x` kills the **pane** under the cursor (`kill_pane`); tmux closes the window
+  with its last pane. Header reads "ctrl-x: close pane". Already done in `ef89d1d`;
+  session-kill dropped — use tmux commands or tmux-palette for that rare case.
 - Session column width mitigated by the wider popup + 20-char cap + `align_columns`
   padding to actual content, not the cap.
+- Because rows are pane-level, a split window shows one row per pane. The session
+  column repeats across them, which is expected — the `{idx}: {name}` column
+  distinguishes them.
