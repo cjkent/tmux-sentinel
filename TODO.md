@@ -2,7 +2,7 @@
 
 ## Planned changes (written up in detail elsewhere)
 
-- **Picker multi-mode redesign** → [picker-modes-plan.md](picker-modes-plan.md)
+- **Picker multi-mode redesign** → [PICKER-MODES-PLAN.md](PICKER-MODES-PLAN.md)
   Drop session header rows, make the session name a column on every row, and sort
   the flat list by one of three modes: `unseen` (default triage view), `session`
   (today's grouped order), `mru` (most-recently-used first). Primary interaction is
@@ -11,7 +11,7 @@
   settled — no open questions. Groundwork already landed in `ef89d1d` (pane-precise
   targets, single `►` marker), which the plan notes so it isn't re-derived.
 
-- **Staleness guard for stranded "working" state** → [stale-working-guard-plan.md](stale-working-guard-plan.md)
+- **Staleness guard for stranded "working" state** → [STALE-WORKING-GUARD-PLAN.md](STALE-WORKING-GUARD-PLAN.md)
   Backstop for panes stranded on `working` when a turn ends without a `Stop` hook
   (interrupt into a footer no manifest rule covers). **Includes a warning worth
   reading before building:** the naive version can flip a genuinely-working agent to
