@@ -50,7 +50,28 @@ from tmux_sentinel.formatting import (
 
 _AGENT_ICONS = {"kiro": "👻", "claude": "🟠"}
 
-_MAX_TITLE_LEN = 40
+# Names are the free-text column, so they get the tightest cap: Claude's live task
+# titles ramble ("Investigate the 5xx errors reported in the ticket…"), and the
+# session column now needs room of its own.
+_MAX_TITLE_LEN = 28
+_MAX_SESSION_LEN = 20
+_MAX_CWD_LEN = 30
+
+
+def _truncate(text: str, limit: int) -> str:
+    """Shorten text to limit characters, marking the elision with an ellipsis."""
+    return text if len(text) <= limit else text[:limit] + "…"
+
+
+def _truncate_head(text: str, limit: int) -> str:
+    """Shorten text by dropping the *front*, keeping the tail.
+
+    Paths are distinguished by their last segments — a Brazil workspace path like
+    ~/workplace/Foo/src/DvRcsSomeService differs from its siblings only at the end —
+    so eliding the head keeps the informative part. align_columns pads every column
+    to its widest value, so one deep path would otherwise indent every other row.
+    """
+    return text if len(text) <= limit else "…" + text[-limit:]
 
 
 def _home_symlink_targets(home: str) -> dict[str, str]:
@@ -111,7 +132,7 @@ def _display_name(pane: PaneInfo, agent_type: str) -> str:
         elif title and len(title) >= 8 and all(c in "0123456789abcdef" for c in title.lower()):
             title = ""
         if title:
-            return title[:_MAX_TITLE_LEN] + ("…" if len(title) > _MAX_TITLE_LEN else "")
+            return _truncate(title, _MAX_TITLE_LEN)
     return pane.window_name
 
 
@@ -141,9 +162,15 @@ def _build_rows(
     marker identifies that exact pane rather than every pane in the current
     window — a split window has several panes but only one is focused.
 
+    Rows are flat — there are no session header rows. The session name is a column
+    on every row instead, which keeps each row a real fzf target (so a query like
+    "myproj waiting" narrows correctly, where a header row could only ever match
+    itself) and leaves the row order free to change. Rows are still emitted in
+    session order, so the display groups by session exactly as the headers did.
+
     Returns:
         (rows, targets) where rows[i] is a list of column values and
-        targets[i] is a pane id (no %) or "" for session headers.
+        targets[i] is a pane id (no %).
     """
     from tmux_sentinel.status import STATUS_DIR as DEFAULT_DIR
     sd = status_dir or DEFAULT_DIR
@@ -166,9 +193,6 @@ def _build_rows(
     for session in session_order:
         if session not in sessions:
             continue
-        # Session header
-        rows.append([f"── {session} ──", "", "", "", "", "", ""])
-        targets.append(f"{session}:")
 
         for p in sessions[session]:
             agent_icon = _AGENT_ICONS.get(at.get(p.pane_id, ""), "  ")
@@ -222,21 +246,27 @@ def _build_rows(
                 git_branch = gb.get(p.pane_id, "")
                 branch = f"({git_branch})" if git_branch else ""
 
-            short_cwd = _shorten_path(cwd, home, home_symlinks)
-            # The leading marker column is shared: a current window shows ►, an
-            # unseen (finished-but-unviewed) window shows ●. These never clash —
-            # the current window is always seen — so they occupy one column,
-            # keeping "where am I" and "what needs attention" vertically aligned.
+            short_cwd = _truncate_head(
+                _shorten_path(cwd, home, home_symlinks), _MAX_CWD_LEN
+            )
+            # The leading marker column is shared: the focused pane shows ►, an
+            # unseen (finished-but-unviewed) pane shows ●. These never clash — the
+            # focused pane is always seen — so they occupy one column, keeping
+            # "where am I" and "what needs attention" vertically aligned. It's its
+            # own column now, so align_columns pads it rather than the name string
+            # carrying the marker's width.
             if is_current:
-                marker = "► "
+                marker = "►"
             elif unseen:
-                marker = "● "
+                marker = "●"
             else:
-                marker = "  "
+                marker = " "
             name = _display_name(p, at.get(p.pane_id, ""))
 
             rows.append([
-                f"{marker}{p.window_index}: {name}",
+                marker,
+                _truncate(p.session, _MAX_SESSION_LEN),
+                f"{p.window_index}: {name}",
                 agent_icon,
                 icon_display,
                 short_cwd,
@@ -263,9 +293,9 @@ def _colorize_line(line: str) -> str:
         ("[WRK]", "\033[34m[WRK]\033[0m"),
         ("[WAI]", "\033[35m[WAI]\033[0m"),
         ("[ERR]", "\033[31m[ERR]\033[0m"),
-        # The unseen dot now leads the row (in the shared marker column) rather
-        # than trailing the status label, so match it at the start of the line.
-        ("● ", f"{RED}●{RESET} "),
+        # The unseen dot sits alone in the leading marker column, so match the bare
+        # glyph — it can't collide with anything else on the line.
+        ("●", f"{RED}●{RESET}"),
     ]
     for old, new in replacements:
         line = line.replace(old, new)
@@ -450,8 +480,7 @@ def main() -> None:
     if result.returncode != 0 or not result.stdout.strip():
         return
 
-    # Extract target from selection. Targets are pane ids (session headers carry
-    # an empty target, so they select nothing).
+    # Extract target from selection. Every row is a selectable pane id.
     selection = result.stdout.strip()
     target = selection.split(sep)[-1] if sep in selection else ""
     if target and target.isdigit():

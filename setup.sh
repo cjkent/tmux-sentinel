@@ -304,7 +304,7 @@ tmux set -g status-right "#($REPO_DIR/bin/status_client.sh '#{pane_id}') %H:%M" 
 # Custom keys are entered in tmux's own notation (e.g. "a", "M-Space", "C-x")
 # rather than captured as raw keystrokes, since that's fragile across
 # terminals/encodings and tmux already validates its own notation for us.
-PICKER_CMD=(display-popup -w 70% -h 50% -E "PYTHONPATH=$REPO_DIR python3 -S $REPO_DIR/tmux_sentinel/picker.py")
+PICKER_CMD=(display-popup -w 85% -h 70% -E "PYTHONPATH=$REPO_DIR python3 -S $REPO_DIR/tmux_sentinel/picker.py")
 DEFAULT_KEY="M-Space"
 DEFAULT_PREFIXED=0
 
@@ -355,9 +355,9 @@ if [[ "${persist:-Y}" =~ ^[Yy]$ ]]; then
     TMUX_CONF="$HOME/.tmux.conf"
     MARKER="# tmux-sentinel: agent picker keybind"
     if [ "$PREFIXED" -eq 1 ]; then
-        BIND_LINE="bind-key $KEY display-popup -w 70% -h 50% -E \"PYTHONPATH=$REPO_DIR python3 -S $REPO_DIR/tmux_sentinel/picker.py\""
+        BIND_LINE="bind-key $KEY display-popup -w 85% -h 70% -E \"PYTHONPATH=$REPO_DIR python3 -S $REPO_DIR/tmux_sentinel/picker.py\""
     else
-        BIND_LINE="bind -n $KEY display-popup -w 70% -h 50% -E \"PYTHONPATH=$REPO_DIR python3 -S $REPO_DIR/tmux_sentinel/picker.py\""
+        BIND_LINE="bind -n $KEY display-popup -w 85% -h 70% -E \"PYTHONPATH=$REPO_DIR python3 -S $REPO_DIR/tmux_sentinel/picker.py\""
     fi
 
     if [ -f "$TMUX_CONF" ] && grep -qF "$MARKER" "$TMUX_CONF"; then

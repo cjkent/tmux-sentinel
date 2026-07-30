@@ -68,9 +68,9 @@ Process detection uses a single `ps` snapshot + BFS tree walk from each pane's s
 3. Reads status files for agent panes, falls back to tmux's `pane_current_path` for non-agent windows
 4. Aligns columns using Python string formatting (no external `column` command)
 5. Colorizes status labels with ANSI codes: green=idle, yellow=working, purple=waiting, red=error
-6. Groups windows under session headers
-7. Marks the current window with `►` in a leading marker column
-8. Shows a red `●` dot in that same marker column for windows with unseen status changes (the current window is always seen, so the two never clash — keeping "where am I" and "what needs attention" vertically aligned)
+6. Shows the session name as a column on every row, ordered by session (so rows still group by session, but every row is a real fzf target — a query like `myproj waiting` narrows correctly, where a header row could only match itself)
+7. Marks the focused pane with `►` in a leading marker column
+8. Shows a red `●` dot in that same marker column for panes with unseen status changes (the focused pane is always seen, so the two never clash — keeping "where am I" and "what needs attention" vertically aligned)
 9. On selection, focuses that exact pane (split panes are individually selectable, since targets are pane ids rather than `session:window`)
 
 Elapsed time is shown only for working agents — it reflects time since the user's last prompt, useful for spotting stuck agents.

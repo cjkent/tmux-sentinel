@@ -10,6 +10,18 @@ from tmux_sentinel.picker import (
 )
 
 
+# Column positions in a _build_rows row. Named so a column-order change means
+# editing this block, not every assertion below.
+COL_MARKER = 0
+COL_SESSION = 1
+COL_NAME = 2
+COL_ICON = 3
+COL_STATUS = 4
+COL_CWD = 5
+COL_BRANCH = 6
+COL_ELAPSED = 7
+
+
 def _make_pane(pane_id="99990", session="test", window_index="0", window_name="zsh", path="/tmp", title=""):
     return PaneInfo(
         pane_id=pane_id, pane_pid="1000", session=session,
@@ -38,27 +50,68 @@ def test_build_rows_with_agent():
     d = _setup()
     write_status("99990", WORKING, "/home/user/dev", "main", 1000, status_dir=d)
     rows, targets = _rows(d, [_make_pane()], "test", "0")
-    assert len(rows) == 2
-    assert targets[0] == "test:"
+    # Flat rows: no session header, so one pane means exactly one row.
+    assert len(rows) == 1
     # Targets are pane ids, so split panes are individually selectable.
-    assert targets[1] == "99990"
-    assert "[WRK]" in rows[1][2]
+    assert targets[0] == "99990"
+    assert "[WRK]" in rows[0][COL_STATUS]
+
+
+def test_build_rows_has_no_session_header():
+    # Headers are gone: the session is a column on every row instead, which keeps
+    # every row a real fzf target.
+    d = _setup()
+    rows, targets = _rows(d, [_make_pane(session="myproj")])
+    assert len(rows) == 1
+    assert rows[0][COL_SESSION] == "myproj"
+    assert all(t for t in targets), "no row should carry an empty (header) target"
+    assert not any("──" in c for row in rows for c in row)
+
+
+def test_build_rows_session_column_repeats_per_row():
+    d = _setup()
+    panes = [
+        _make_pane(pane_id="99990", window_index="0"),
+        _make_pane(pane_id="99991", window_index="1"),
+    ]
+    rows, _ = _rows(d, panes)
+    assert [r[COL_SESSION] for r in rows] == ["test", "test"]
+
+
+def test_build_rows_truncates_long_session_name():
+    d = _setup()
+    long_name = "a-very-long-session-name-well-past-the-cap"
+    rows, _ = _rows(d, [_make_pane(session=long_name)])
+    cell = rows[0][COL_SESSION]
+    assert cell.endswith("…")
+    assert len(cell) == 21  # 20 chars + the ellipsis
 
 
 def test_build_rows_non_agent():
     d = _setup()
     rows, _ = _rows(d, [_make_pane(path="/home/user/projects")])
-    assert len(rows) == 2
-    assert "[---]" in rows[1][2]
-    assert "/home/user/projects" in rows[1][3]
+    assert len(rows) == 1
+    assert "[---]" in rows[0][COL_STATUS]
+    assert "/home/user/projects" in rows[0][COL_CWD]
+
+
+def test_build_rows_truncates_long_cwd_from_the_front():
+    # Deep Brazil paths would otherwise pad every other row; the tail is the
+    # informative part, so the head is elided.
+    d = _setup()
+    deep = "/home/user/workplace/Thing/src/DvRcsSomeVeryLongServiceName"
+    rows, _ = _rows(d, [_make_pane(path=deep)])
+    cell = rows[0][COL_CWD]
+    assert cell.startswith("…")
+    assert cell.endswith("DvRcsSomeVeryLongServiceName")
 
 
 def test_build_rows_current_window_marker():
     d = _setup()
     panes = [_make_pane(), _make_pane(pane_id="99991", window_index="1", window_name="vim")]
     rows, _ = _rows(d, panes, "test", "0")
-    assert rows[1][0].startswith("►")
-    assert rows[2][0].startswith("  ")
+    assert rows[0][COL_MARKER] == "►"
+    assert rows[1][COL_MARKER].strip() == ""
 
 
 def test_build_rows_unseen_marker():
@@ -66,9 +119,8 @@ def test_build_rows_unseen_marker():
     write_status("99990", IDLE, "/tmp", "", 1000, status_dir=d)
     set_unseen("99990", status_dir=d)
     rows, _ = _rows(d, [_make_pane()])
-    # The unseen dot now leads the row in the shared marker column (col 0),
-    # not trailing the status label.
-    assert rows[1][0].startswith("●")
+    # The unseen dot sits alone in the leading marker column.
+    assert rows[0][COL_MARKER] == "●"
 
 
 def test_build_rows_seen_no_marker():
@@ -76,18 +128,17 @@ def test_build_rows_seen_no_marker():
     write_status("99990", IDLE, "/tmp", "", 1000, status_dir=d)
     # No unseen flag
     rows, _ = _rows(d, [_make_pane()])
-    assert "●" not in rows[1][0]
+    assert rows[0][COL_MARKER].strip() == ""
 
 
 def test_build_rows_current_window_not_unseen_marker():
-    # The current window shares the marker column with the unseen dot, but ►
-    # must win — a current window is by definition seen, so it never shows ●.
+    # The focused pane shares the marker column with the unseen dot, but ► must
+    # win — the focused pane is by definition seen, so it never shows ●.
     d = _setup()
     write_status("99990", IDLE, "/tmp", "", 1000, status_dir=d)
     set_unseen("99990", status_dir=d)
     rows, _ = _rows(d, [_make_pane()], "test", "0")
-    assert rows[1][0].startswith("►")
-    assert "●" not in rows[1][0]
+    assert rows[0][COL_MARKER] == "►"
 
 
 def _rows_focused(d, panes, focused_pane, cur_session="test", cur_window="0"):
@@ -112,9 +163,9 @@ def test_split_panes_get_distinct_targets():
         _make_pane(pane_id="99991", window_index="0"),
     ]
     _, targets = _rows_focused(d, panes, focused_pane="99990")
-    assert targets[1] == "99990"
-    assert targets[2] == "99991"
-    assert targets[1] != targets[2]
+    assert targets[0] == "99990"
+    assert targets[1] == "99991"
+    assert targets[0] != targets[1]
 
 
 def test_split_panes_only_focused_pane_is_current():
@@ -125,19 +176,19 @@ def test_split_panes_only_focused_pane_is_current():
         _make_pane(pane_id="99991", window_index="0"),
     ]
     rows, _ = _rows_focused(d, panes, focused_pane="99991")
-    assert not rows[1][0].startswith("►")
-    assert rows[2][0].startswith("►")
+    assert rows[0][COL_MARKER] != "►"
+    assert rows[1][COL_MARKER] == "►"
 
 
 def test_current_marker_falls_back_to_window_without_focused_pane():
     # With no focused_pane supplied, fall back to session+window matching.
     d = _setup()
     rows, _ = _rows(d, [_make_pane()], "test", "0")
-    assert rows[1][0].startswith("►")
+    assert rows[0][COL_MARKER] == "►"
 
 
 def test_colorize_line():
-    line = "● 0: zsh  [IDL]  ~/dev  (main)"
+    line = "●  test  0: zsh  [IDL]  ~/dev  (main)"
     result = _colorize_line(line)
     assert "\033[32m[IDL]\033[0m" in result
     assert "\033[31m●\033[0m" in result
@@ -156,9 +207,9 @@ def test_elapsed_only_for_working():
     panes = [_make_pane(), _make_pane(pane_id="99991", window_index="1")]
     rows, _ = _rows(d, panes)
     # Working row should have elapsed time (non-empty last column)
-    assert rows[1][5] != ""
+    assert rows[0][COL_ELAPSED] != ""
     # Idle row should have empty elapsed
-    assert rows[2][5] == ""
+    assert rows[1][COL_ELAPSED] == ""
 
 
 def _rows_daemon(d, panes, daemon_state, cur_session="other", cur_window="99"):
@@ -177,8 +228,8 @@ def test_daemon_state_fast_path():
     ds = {"99990": {"status": WORKING, "cwd": "/srv/app", "git_branch": "dev",
                     "timestamp": 1000, "unseen": False, "agent_type": "claude"}}
     rows, _ = _rows_daemon(d, [_make_pane()], ds, "test", "0")
-    assert "[WRK]" in rows[1][2]
-    assert rows[1][5] != ""  # elapsed shown for working
+    assert "[WRK]" in rows[0][COL_STATUS]
+    assert rows[0][COL_ELAPSED] != ""  # elapsed shown for working
 
 
 def test_daemon_state_prefers_status_file_cwd():
@@ -188,8 +239,8 @@ def test_daemon_state_prefers_status_file_cwd():
     ds = {"99990": {"status": WORKING, "cwd": "/shallow", "git_branch": "other",
                     "timestamp": 1000, "unseen": False, "agent_type": "claude"}}
     rows, _ = _rows_daemon(d, [_make_pane()], ds, "test", "0")
-    assert "/deep/agent/path" in rows[1][3]
-    assert "(main)" in rows[1][4]
+    assert "/deep/agent/path" in rows[0][COL_CWD]
+    assert "(main)" in rows[0][COL_BRANCH]
 
 
 def test_daemon_state_unseen_marker():
@@ -197,8 +248,8 @@ def test_daemon_state_unseen_marker():
     ds = {"99990": {"status": IDLE, "cwd": "/tmp", "git_branch": "",
                     "timestamp": 1000, "unseen": True, "agent_type": "claude"}}
     rows, _ = _rows_daemon(d, [_make_pane()], ds)
-    # Unseen dot now leads the row in the shared marker column (col 0).
-    assert rows[1][0].startswith("●")
+    # Unseen dot sits alone in the leading marker column.
+    assert rows[0][COL_MARKER] == "●"
 
 
 def test_generate_list_from_daemon_calls_cleanup_stale():
@@ -254,11 +305,12 @@ def test_display_name_falls_back_when_no_title():
 
 
 def test_display_name_truncates_long_title():
+    from tmux_sentinel.picker import _MAX_TITLE_LEN
     long_title = "✳ " + "x" * 60
     pane = _make_pane(window_name="claude", title=long_title)
     name = _display_name(pane, "claude")
     assert name.endswith("…")
-    assert len(name) == 41  # _MAX_TITLE_LEN + ellipsis
+    assert len(name) == _MAX_TITLE_LEN + 1  # cap + ellipsis
 
 
 def test_display_name_works_for_kiro_too():
