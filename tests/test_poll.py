@@ -1,0 +1,125 @@
+"""Tests for tmux_sentinel_daemon.poll — screen-scrape state correction."""
+from tmux_sentinel.status import IDLE, WORKING, WAITING
+from tmux_sentinel_daemon.poll import _has_working_marker
+from tmux_sentinel_daemon.state import DaemonState
+
+
+# --- _has_working_marker: live turn vs leftover text from a finished one ---
+
+def test_marker_live_working_with_timer():
+    assert _has_working_marker("✽ Working… (30s · ↓ 1.2k tokens)")
+
+
+def test_marker_live_alternate_spinner_verbs():
+    # Claude Code rotates the gerund; the timer is what makes it live.
+    assert _has_working_marker("✻ Crunching… (5m 7s)")
+    assert _has_working_marker("✶ Churning… (12s)")
+
+
+def test_marker_esc_to_interrupt():
+    assert _has_working_marker("some output\n  esc to interrupt\n")
+
+
+def test_marker_rejects_finished_turn_text():
+    # Past-tense summaries linger on screen after a turn ends — these must NOT
+    # read as working, or an idle pane would be wrongly promoted.
+    assert not _has_working_marker("✻ Crunched for 1m 9s")
+    assert not _has_working_marker("✻ Churned for 1h 1m 55s")
+
+
+def test_marker_rejects_stale_bare_timer():
+    # A bare parenthesised duration in scrollback (tool output, HTTP timings) is
+    # not evidence of a live turn.
+    assert not _has_working_marker("⎿ Received 1KB (200 OK) in (12s)")
+
+
+def test_marker_rejects_idle_footers():
+    assert not _has_working_marker("⏵⏵ auto mode on (shift+tab to cycle) · ← for agents")
+    assert not _has_working_marker("⏸ manual mode on · ← for agents")
+
+
+def test_marker_rejects_empty():
+    assert not _has_working_marker("")
+    assert not _has_working_marker(None)
+
+
+# --- the idle -> working promotion in run_poll ---
+#
+# Only a hook moves a pane into WORKING, but a turn can start without one
+# reaching the daemon (resumed session, /compact continuation, dropped hook).
+# The poll promotes such a pane when the screen shows a live turn.
+
+def _run_poll_with(monkey_tails, state):
+    """Run one poll cycle with tmux/process calls stubbed out.
+
+    monkey_tails maps pane_id -> captured text.
+    """
+    import tmux_sentinel_daemon.poll as pm
+
+    saved = {
+        name: getattr(pm, name)
+        for name in (
+            "pane_pids", "_get_process_tree", "get_agent_panes", "focused_pane_id",
+            "list_panes", "get_agent_types", "_fix_window_names",
+            "capture_pane_tail", "_get_git_branch",
+        )
+    }
+    panes = list(monkey_tails)
+    try:
+        pm.pane_pids = lambda: {p: "1000" for p in panes}
+        pm._get_process_tree = lambda: {}
+        pm.get_agent_panes = lambda pp, process_tree=None: set(panes)
+        pm.focused_pane_id = lambda: ""          # nothing focused: no mark_seen
+        pm.list_panes = lambda: []
+        pm.get_agent_types = lambda pp, process_tree=None: {p: "claude" for p in panes}
+        pm._fix_window_names = lambda *a, **k: None
+        pm.capture_pane_tail = lambda pane_id, lines=10: monkey_tails.get(pane_id, "")
+        pm._get_git_branch = lambda cwd: ""
+        pm.run_poll(state)
+    finally:
+        for name, fn in saved.items():
+            setattr(pm, name, fn)
+
+
+def test_poll_promotes_idle_pane_showing_live_turn():
+    state = DaemonState()
+    ps = state.ensure("7")
+    ps.status = IDLE
+    ps.unseen = True  # a stale unseen flag from the previous turn
+    _run_poll_with({"7": "✽ Working… (30s · ↓ 1.2k tokens)"}, state)
+    assert state.get("7").status == WORKING
+    # A turn is running, so no finished-but-unseen result stands.
+    assert state.get("7").unseen is False
+
+
+def test_poll_leaves_genuinely_idle_pane_alone():
+    state = DaemonState()
+    state.ensure("7").status = IDLE
+    _run_poll_with({"7": "⏵⏵ auto mode on (shift+tab to cycle) · ← for agents"}, state)
+    assert state.get("7").status == IDLE
+
+
+def test_poll_does_not_promote_on_finished_turn_text():
+    state = DaemonState()
+    state.ensure("7").status = IDLE
+    _run_poll_with({"7": "✻ Crunched for 1m 9s\n❯ \n"}, state)
+    assert state.get("7").status == IDLE
+
+
+def test_poll_promotion_sets_timestamp():
+    # Elapsed time in the picker is measured from this timestamp; a promoted pane
+    # has no prompt event to inherit one from, so the poll must set it.
+    state = DaemonState()
+    ps = state.ensure("7")
+    ps.status = IDLE
+    ps.timestamp = 0
+    _run_poll_with({"7": "✶ Working… (5s)"}, state)
+    assert state.get("7").timestamp > 0
+
+
+if __name__ == "__main__":
+    for name, func in sorted(globals().items()):
+        if name.startswith("test_") and callable(func):
+            func()
+            print(f"  ✓ {name}")
+    print("\nAll tests passed")

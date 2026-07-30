@@ -52,7 +52,12 @@ SOCK_PATH = SOCK_DIR / "daemon.sock"
 PID_FILE = SOCK_DIR / "daemon.pid"
 LOCK_FILE = SOCK_DIR / "daemon.lock"
 
-POLL_INTERVAL_IDLE = 30.0
+# The idle interval bounds how long a hookless turn (resumed session, /compact
+# continuation, dropped hook) can show as IDL before the poll's screen-scrape
+# promotes it — see the IDLE branch in poll.run_poll. 30s was long enough to feel
+# broken; 10s keeps the worst case brief while still being a cheap background rate
+# when nothing is running.
+POLL_INTERVAL_IDLE = 10.0
 POLL_INTERVAL_ACTIVE = 5.0
 
 log = logging.getLogger("tmux-sentinel-daemon")

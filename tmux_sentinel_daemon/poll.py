@@ -6,6 +6,8 @@ but updates the in-memory DaemonState instead of writing files.
 """
 from __future__ import annotations
 
+import re
+
 from tmux_sentinel.status import IDLE, WORKING, WAITING
 from tmux_sentinel.process import get_agent_panes, get_agent_types, _get_process_tree
 from tmux_sentinel.tmux import list_panes, pane_pids, capture_pane_tail, focused_pane_id, _run_tmux
@@ -26,6 +28,26 @@ def _detect_pane_state(pane_id: str, agent_type: str = "claude") -> str | None:
     if not rules:
         return None
     return classify(tail, rules)
+
+
+# Evidence that a turn is running *right now*, used to promote idle -> working.
+# Deliberately stricter than the manifest's idle-veto pattern: that one may match
+# leftover text from a finished turn ("Crunched for 1m 9s"), which is fine for
+# vetoing but would wrongly promote an idle pane. A live turn renders a spinner
+# verb immediately followed by a parenthesised running timer — "✽ Working… (30s ·
+# ↓ 1.2k tokens)" — or the older "esc to interrupt" hint. The verb list covers
+# Claude Code's rotating gerunds; the trailing "…\s*\(\d" is what makes it live,
+# since completed lines read "Crunched for 1m 9s" with no parenthesis.
+_WORKING_MARKER = re.compile(
+    r"esc to interrupt"
+    r"|(?:Working|Crunch\w*|Churn\w*|Cooking|Baking|Percolating|Thinking|Pondering)"
+    r"…\s*\(\d"
+)
+
+
+def _has_working_marker(tail: str) -> bool:
+    """True if the captured text shows a turn actively in progress."""
+    return bool(_WORKING_MARKER.search(tail or ""))
 
 
 _WINDOW_NAME_MAP = {"claude": "claude", "kiro": "kiro"}
@@ -92,6 +114,19 @@ def run_poll(state: DaemonState) -> None:
             elif actual is None and ps.status == WAITING:
                 ps.status = WORKING
                 # Back to working means no completed-and-unseen result stands.
+                ps.unseen = False
+
+        elif ps.status == IDLE:
+            # Nothing else promotes idle -> working: only a hook does, and a turn
+            # can begin without one reaching us (resumed session, /compact
+            # continuation, agent-initiated turn, or a dropped hook). Such a pane
+            # would sit on IDL until its first PreToolUse. The live spinner /
+            # elapsed-timer marker is positive evidence of a turn in progress, so
+            # promote on it — and since the turn is running, no finished-but-unseen
+            # result stands.
+            if _has_working_marker(capture_pane_tail(pane_id, lines=10)):
+                ps.status = WORKING
+                ps.timestamp = now
                 ps.unseen = False
 
     if state.focused_pane:
