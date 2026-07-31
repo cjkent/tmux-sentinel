@@ -103,15 +103,18 @@ def test_build_rows_non_agent():
     assert "/home/user/projects" in rows[0][COL_CWD]
 
 
-def test_build_rows_truncates_long_cwd_from_the_front():
-    # Deep Brazil paths would otherwise pad every other row; the tail is the
-    # informative part, so the head is elided.
+def test_build_rows_elides_middle_of_long_cwd():
+    # Deep Brazil paths would otherwise pad every other row. The leading segments
+    # name the project and the last names the package, so the middle is what goes.
+    # Built from the real $HOME so _shorten_path collapses it to "~" first.
+    import os
     d = _setup()
-    deep = "/home/user/workplace/Thing/src/DvRcsSomeVeryLongServiceName"
+    deep = os.path.join(
+        os.path.expanduser("~"), "workplace/Thing/src/nested/DvRcsSomeVeryLongServiceName"
+    )
     rows, _ = _rows(d, [_make_pane(path=deep)])
     cell = rows[0][COL_CWD]
-    assert cell.startswith("…")
-    assert cell.endswith("DvRcsSomeVeryLongServiceName")
+    assert cell == "~/workplace/Thing/…/DvRcsSomeVeryLongServiceName"
 
 
 def test_build_rows_current_window_marker():
@@ -357,6 +360,52 @@ def test_shorten_path_similar_prefix_not_matched():
     # /Volumes/workplace2 must not be treated as inside /Volumes/workplace.
     syms = {"/Volumes/workplace": "~/workplace"}
     assert _shorten_path("/Volumes/workplace2/foo", "/Users/cjkent", syms) == "/Volumes/workplace2/foo"
+
+
+def test_truncate_path_leaves_short_paths_alone():
+    from tmux_sentinel.picker import _truncate_path
+    assert _truncate_path("~/dev/tmux-sentinel", 50) == "~/dev/tmux-sentinel"
+    assert _truncate_path("~/tmp", 50) == "~/tmp"
+
+
+def test_truncate_path_keeps_project_and_package():
+    # "~" isn't a meaningful segment, so it keeps three to reach two real ones.
+    from tmux_sentinel.picker import _truncate_path
+    p = "~/workplace/PVRF-820/src/DvRcsCalculationServiceCDK"
+    assert _truncate_path(p, 50) == "~/workplace/PVRF-820/…/DvRcsCalculationServiceCDK"
+
+
+def test_truncate_path_absolute_keeps_two_real_segments():
+    # A leading "/" splits to an empty first segment — it must not count as one of
+    # the two meaningful ones, or "workplace" would be lost here.
+    from tmux_sentinel.picker import _truncate_path
+    p = "/Volumes/workplace/Foo/src/Bar/baz/deeply/nested/thing"
+    assert _truncate_path(p, 50) == "/Volumes/workplace/…/thing"
+
+
+def test_truncate_path_no_middle_to_elide():
+    from tmux_sentinel.picker import _truncate_path
+    # Only head + tail, nothing between: falls back to a plain tail truncation.
+    p = "~/aaaaaaaaaaaaaaaaaaaaaaaaaaa/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    out = _truncate_path(p, 50)
+    assert len(out) <= 51
+    assert "…" in out
+
+
+def test_truncate_path_absurdly_long_final_segment():
+    # The elided form still wouldn't fit, so fall back to dropping the front.
+    from tmux_sentinel.picker import _truncate_path
+    p = "~/a/b/c/ThisFinalSegmentIsAbsurdlyLongAndCannotPossiblyFitInFifty"
+    out = _truncate_path(p, 50)
+    assert out.startswith("…")
+    assert len(out) <= 51
+
+
+def test_truncate_path_edge_cases():
+    from tmux_sentinel.picker import _truncate_path
+    assert _truncate_path("", 50) == ""
+    assert _truncate_path("/", 50) == "/"
+    assert _truncate_path("~", 50) == "~"
 
 
 def test_home_symlink_targets_finds_dir_symlink():

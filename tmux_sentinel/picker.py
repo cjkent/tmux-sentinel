@@ -55,7 +55,12 @@ _AGENT_ICONS = {"kiro": "👻", "claude": "🟠"}
 # session column now needs room of its own.
 _MAX_TITLE_LEN = 28
 _MAX_SESSION_LEN = 20
-_MAX_CWD_LEN = 30
+_MAX_CWD_LEN = 50
+
+# How many leading path segments to keep when eliding the middle of a long path.
+# "~" is a segment but not a meaningful one, so a path starting with it keeps an
+# extra segment to reach the same depth.
+_CWD_HEAD_SEGMENTS = 2
 
 
 def _truncate(text: str, limit: int) -> str:
@@ -63,15 +68,33 @@ def _truncate(text: str, limit: int) -> str:
     return text if len(text) <= limit else text[:limit] + "…"
 
 
-def _truncate_head(text: str, limit: int) -> str:
-    """Shorten text by dropping the *front*, keeping the tail.
+def _truncate_path(path: str, limit: int) -> str:
+    """Shorten a path by eliding its middle, keeping the head and the last segment.
 
-    Paths are distinguished by their last segments — a Brazil workspace path like
-    ~/workplace/Foo/src/DvRcsSomeService differs from its siblings only at the end —
-    so eliding the head keeps the informative part. align_columns pads every column
-    to its widest value, so one deep path would otherwise indent every other row.
+    The leading segments identify the project (~/workplace/PVRF-820/…) and the last
+    identifies the package (…/DvRcsCalculationServiceCDK); it's the middle that's
+    boilerplate. Dropping the head, as a plain tail-truncation would, loses the
+    project — which is the part you scan for. align_columns pads every column to its
+    widest value, so one deep path would otherwise indent every other row.
     """
-    return text if len(text) <= limit else "…" + text[-limit:]
+    if len(path) <= limit:
+        return path
+    segments = path.split("/")
+    # Neither "~" nor the empty string from a leading "/" is a meaningful segment, so
+    # keep one extra past it to reach the same real depth.
+    head_count = _CWD_HEAD_SEGMENTS
+    if segments[0] in ("~", ""):
+        head_count += 1
+    # Nothing to elide unless there's at least one segment between head and tail.
+    if len(segments) <= head_count + 1:
+        return _truncate(path, limit)
+    head = "/".join(segments[:head_count])
+    candidate = f"{head}/…/{segments[-1]}"
+    # If the elided form still doesn't fit (a very long final segment), fall back to
+    # dropping the front — at that point the tail is all that can be shown.
+    if len(candidate) > limit:
+        return "…" + path[-limit:]
+    return candidate
 
 
 def _home_symlink_targets(home: str) -> dict[str, str]:
@@ -246,7 +269,7 @@ def _build_rows(
                 git_branch = gb.get(p.pane_id, "")
                 branch = f"({git_branch})" if git_branch else ""
 
-            short_cwd = _truncate_head(
+            short_cwd = _truncate_path(
                 _shorten_path(cwd, home, home_symlinks), _MAX_CWD_LEN
             )
             # The leading marker column is shared: the focused pane shows ►, an
