@@ -266,7 +266,7 @@ def _build_rows(
             rows.append([
                 marker,
                 _truncate(p.session, _MAX_SESSION_LEN),
-                f"{p.window_index}: {name}",
+                name,
                 agent_icon,
                 icon_display,
                 short_cwd,

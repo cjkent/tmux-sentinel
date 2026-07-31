@@ -68,6 +68,14 @@ def test_build_rows_has_no_session_header():
     assert not any("──" in c for row in rows for c in row)
 
 
+def test_build_rows_name_column_omits_window_index():
+    # The window index isn't actionable from the picker — you can't type it to jump
+    # anywhere, and it only adds noise to fzf matching.
+    d = _setup()
+    rows, _ = _rows(d, [_make_pane(window_index="7", window_name="zsh")])
+    assert rows[0][COL_NAME] == "zsh"
+
+
 def test_build_rows_session_column_repeats_per_row():
     d = _setup()
     panes = [
@@ -188,7 +196,7 @@ def test_current_marker_falls_back_to_window_without_focused_pane():
 
 
 def test_colorize_line():
-    line = "●  test  0: zsh  [IDL]  ~/dev  (main)"
+    line = "●  test  zsh  [IDL]  ~/dev  (main)"
     result = _colorize_line(line)
     assert "\033[32m[IDL]\033[0m" in result
     assert "\033[31m●\033[0m" in result
