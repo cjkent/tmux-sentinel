@@ -408,6 +408,48 @@ def test_truncate_path_edge_cases():
     assert _truncate_path("~", 50) == "~"
 
 
+def _with_preview_state(tmp_path):
+    """Point the preview state file at a temp location for the duration of a test."""
+    import tmux_sentinel.picker as pm
+    orig = pm._PREVIEW_STATE_FILE
+    pm._PREVIEW_STATE_FILE = tmp_path / "preview"
+    return orig
+
+
+def test_preview_hidden_by_default():
+    import tmux_sentinel.picker as pm
+    orig = _with_preview_state(Path(tempfile.mkdtemp()))
+    try:
+        assert pm._preview_visible() is False
+    finally:
+        pm._PREVIEW_STATE_FILE = orig
+
+
+def test_preview_state_persists_across_toggles():
+    # The popup is a fresh process each time, so visibility has to live on disk to
+    # survive between invocations.
+    import tmux_sentinel.picker as pm
+    orig = _with_preview_state(Path(tempfile.mkdtemp()))
+    try:
+        pm._toggle_preview_state()
+        assert pm._preview_visible() is True
+        pm._toggle_preview_state()
+        assert pm._preview_visible() is False
+    finally:
+        pm._PREVIEW_STATE_FILE = orig
+
+
+def test_preview_state_creates_parent_dir():
+    # First ever toggle may predate ~/.tmux-sentinel existing.
+    import tmux_sentinel.picker as pm
+    orig = _with_preview_state(Path(tempfile.mkdtemp()) / "nested" / "deeper")
+    try:
+        pm._toggle_preview_state()
+        assert pm._preview_visible() is True
+    finally:
+        pm._PREVIEW_STATE_FILE = orig
+
+
 def test_home_symlink_targets_finds_dir_symlink():
     import os
     home = Path(tempfile.mkdtemp())

@@ -421,6 +421,26 @@ def _generate_list_direct() -> str:
     return _render(rows, targets)
 
 
+# Whether the preview pane is showing persists between popup invocations, so the
+# choice sticks instead of resetting every time. fzf has no memory of its own, so
+# it lives in a file alongside the other runtime state (status dir, socket, pid).
+_PREVIEW_STATE_FILE = Path.home() / ".tmux-sentinel" / "preview"
+
+
+def _preview_visible() -> bool:
+    """True if the preview pane was left showing last time."""
+    return _PREVIEW_STATE_FILE.exists()
+
+
+def _toggle_preview_state() -> None:
+    """Flip the remembered preview visibility."""
+    if _PREVIEW_STATE_FILE.exists():
+        _PREVIEW_STATE_FILE.unlink(missing_ok=True)
+    else:
+        _PREVIEW_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        _PREVIEW_STATE_FILE.touch()
+
+
 def _render(rows: list[list[str]], targets: list[str]) -> str:
     """Align, colorize, and join rows into the fzf input string."""
     aligned = align_columns(rows)
@@ -444,6 +464,11 @@ def main() -> None:
             kill_pane(target)
         return
 
+    # --toggle-preview mode: remember the new preview visibility (used by fzf's ?).
+    if len(sys.argv) > 1 and sys.argv[1] == "--toggle-preview":
+        _toggle_preview_state()
+        return
+
     fzf_input = _generate_list()
     sep = "\x1f"
 
@@ -465,6 +490,12 @@ def main() -> None:
     script = f"PYTHONPATH={os.environ.get('PYTHONPATH', '.')} python3 -S {__file__}"
     close_cmd = f"{script} --close {{2}}"
     reload_cmd = f"{script} --list"
+    toggle_preview_cmd = f"{script} --toggle-preview"
+
+    # Field 2 is the target pane id, stored without the "%" tmux wants, so the
+    # placeholder gets a literal "%" in front of it. The pane's tail is the useful
+    # part (current output, prompt, any approval request), so capture and tail it.
+    preview_cmd = "tmux capture-pane -ep -t %{2} 2>/dev/null | tail -n 40"
 
     fzf_args = [
         "fzf",
@@ -472,14 +503,22 @@ def main() -> None:
         "--no-sort",
         "--reverse",
         "--prompt=Switch to > ",
-        "--header=ctrl-x: close pane",
+        "--header=ctrl-x: close pane  ?: toggle preview",
         "--no-info",
         "--no-multi",
         "--cycle",
         f"--delimiter={sep}",
         "--with-nth=1",
+        "--preview", preview_cmd,
+        # Always declare the window hidden, then reveal it below if the remembered
+        # state says so. State flows one way — file to fzf — so the two can't drift
+        # into disagreeing about whether the preview is up.
+        "--preview-window=right:50%,hidden",
         "--bind", f"ctrl-x:execute-silent({close_cmd})+reload({reload_cmd})",
+        "--bind", f"?:toggle-preview+execute-silent({toggle_preview_cmd})",
     ]
+    if _preview_visible():
+        fzf_args += ["--bind", "start:show-preview"]
     # Place the cursor on the current window at startup. Bind to `load`, not
     # `start`: with input piped over stdin, `start` fires before fzf has
     # finished reading the list, so pos() would land in an empty buffer and

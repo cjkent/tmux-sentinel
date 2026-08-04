@@ -51,6 +51,8 @@ Additional flag files per pane:
 - `.error` — set when a tool fails, cleared on stop
 - `.unseen` — set on stop, cleared when the user visits the window
 
+Plus one global UI-state file, `~/.tmux-sentinel/preview` — present when the picker's preview pane should open showing.
+
 ### Stale File Cleanup
 
 Status files are cleaned up on every read (by the picker and status bar). A pane's files are removed if:
@@ -72,6 +74,8 @@ Process detection uses a single `ps` snapshot + BFS tree walk from each pane's s
 7. Marks the focused pane with `►` in a leading marker column
 8. Shows a red `●` dot in that same marker column for panes with unseen status changes (the focused pane is always seen, so the two never clash — keeping "where am I" and "what needs attention" vertically aligned)
 9. On selection, focuses that exact pane (split panes are individually selectable, since targets are pane ids rather than `session:window`)
+
+Press `?` to toggle a preview pane showing the last 40 lines of the highlighted pane — useful for reading an agent's current output or a pending approval prompt without switching to it. It's hidden by default, and the choice persists between popups (remembered in `~/.tmux-sentinel/preview`).
 
 Elapsed time is shown only for working agents — it reflects time since the user's last prompt, useful for spotting stuck agents.
 
