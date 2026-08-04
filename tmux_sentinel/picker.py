@@ -513,7 +513,14 @@ def main() -> None:
         # Always declare the window hidden, then reveal it below if the remembered
         # state says so. State flows one way — file to fzf — so the two can't drift
         # into disagreeing about whether the preview is up.
-        "--preview-window=right:50%,hidden",
+        #
+        # "follow" pins the view to the end of the output. A pane's useful context
+        # is always at the bottom (latest output, the prompt, a pending approval),
+        # whereas fzf otherwise shows the top — which for a long-lived pane is
+        # whatever scrolled past 40 lines ago. Note the fzf actions for this
+        # (preview-bottom) don't work bound to start/load: they race the async
+        # preview render, so the window flag is the reliable way to do it.
+        "--preview-window=right:50%,follow,hidden",
         "--bind", f"ctrl-x:execute-silent({close_cmd})+reload({reload_cmd})",
         "--bind", f"?:toggle-preview+execute-silent({toggle_preview_cmd})",
     ]
