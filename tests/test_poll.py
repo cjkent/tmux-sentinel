@@ -16,6 +16,26 @@ def test_marker_live_alternate_spinner_verbs():
     assert _has_working_marker("✶ Churning… (12s)")
 
 
+def test_marker_is_verb_agnostic():
+    # The gerund must NOT be enumerated: Claude Code rotates it freely and adds new
+    # ones, and an unrecognised verb would leave a working pane stuck showing IDL
+    # until its first tool call. Detection keys off the line's shape instead.
+    assert _has_working_marker("✽ Frobnicating… (3s)")
+    assert _has_working_marker("⠂ Reticulating… (1h2m · ↓ 4k tokens)")
+
+
+def test_marker_tolerates_leading_whitespace():
+    assert _has_working_marker("  ✻ Working… (35s · ↓ 1.1k tokens)")
+
+
+def test_marker_rejects_pattern_quoted_in_prose():
+    # A pane showing text *about* the spinner format (a conversation discussing this
+    # very regex, say) must not read as working. The match is anchored to the start
+    # of a line, so mid-line prose can't trip it.
+    assert not _has_working_marker("some prose about Working… (30s) inline in a sentence")
+    assert not _has_working_marker("a live line reads Working… (30s · ↓ 1.2k tokens)")
+
+
 def test_marker_esc_to_interrupt():
     assert _has_working_marker("some output\n  esc to interrupt\n")
 

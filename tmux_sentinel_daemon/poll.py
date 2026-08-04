@@ -33,15 +33,24 @@ def _detect_pane_state(pane_id: str, agent_type: str = "claude") -> str | None:
 # Evidence that a turn is running *right now*, used to promote idle -> working.
 # Deliberately stricter than the manifest's idle-veto pattern: that one may match
 # leftover text from a finished turn ("Crunched for 1m 9s"), which is fine for
-# vetoing but would wrongly promote an idle pane. A live turn renders a spinner
-# verb immediately followed by a parenthesised running timer — "✽ Working… (30s ·
-# ↓ 1.2k tokens)" — or the older "esc to interrupt" hint. The verb list covers
-# Claude Code's rotating gerunds; the trailing "…\s*\(\d" is what makes it live,
-# since completed lines read "Crunched for 1m 9s" with no parenthesis.
+# vetoing but would wrongly promote an idle pane.
+#
+# A live turn renders a status line of the form "<glyph> <verb>… (<elapsed> · …)",
+# e.g. "✳ Working… (30s · ↓ 1.2k tokens)". Matching is deliberately verb-agnostic:
+# Claude Code rotates the gerund freely (Working, Crunching, Churning, Pondering,
+# and others it may add), so enumerating them would silently rot — a verb we hadn't
+# listed would leave a working pane stuck showing IDL until its first tool call.
+#
+# What identifies the line instead is its *shape*: anchored at the start of a line,
+# a single non-space glyph, one word ending in the elision character, then a
+# parenthesised number. The anchor matters — without it the pattern also matches
+# prose that merely quotes it (a pane discussing this very regex would trip it).
+# The "…(" is what makes it *live*: a completed turn reads "Crunched for 1m 9s",
+# with no ellipsis and no parenthesis.
 _WORKING_MARKER = re.compile(
-    r"esc to interrupt"
-    r"|(?:Working|Crunch\w*|Churn\w*|Cooking|Baking|Percolating|Thinking|Pondering)"
-    r"…\s*\(\d"
+    r"^[ \t]*\S[ \t]+\w+…[ \t]*\(\d"
+    r"|esc to interrupt",
+    re.MULTILINE,
 )
 
 
