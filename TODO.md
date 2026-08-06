@@ -22,6 +22,13 @@
   (added in `bb0d863`), so the guard should reuse that rather than define its own —
   and its stricter-pattern reasoning applies there too.
 
+- **Portability: open items for other users** → [PORTABILITY.md](PORTABILITY.md)
+  Audit of what's specific to this machine/setup. The two blockers are fixed (setup.sh
+  aborted for anyone without Kiro; the status bar required `nc -U`, absent on some
+  Linux). Still open: agent detection is process-name based, scrape patterns assume
+  Claude Code's current English UI, emoji/glyph assumptions, and setup overwrites
+  `status-right` wholesale.
+
 ## Ideas
 
 - **Native OS notifications** — Fire a macOS notification (via `osascript`) when an agent hits a permission prompt or finishes, but only when the terminal doesn't have OS focus (so you're not pinged while already looking at it). Requires `focus-events on` in tmux or an `osascript` frontmost-app check.

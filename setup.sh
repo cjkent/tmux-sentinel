@@ -174,8 +174,11 @@ echo -e "${BOLD}tmux-sentinel setup${NC}"
 echo ""
 
 # 1. Check dependencies
+#
+# Versions are checked, not just presence: the features below fail at keypress with
+# cryptic errors rather than at install time, which is a miserable way to find out.
 step "Checking dependencies..."
-for cmd in jq fzf tmux; do
+for cmd in jq fzf tmux python3; do
     if command -v "$cmd" &>/dev/null; then
         info "$cmd found"
     else
@@ -184,29 +187,70 @@ for cmd in jq fzf tmux; do
     fi
 done
 
+# True if $1 is a lower version than $2. sort -V orders versions properly, but its
+# lowest entry equals $1 both when $1 < $2 and when they're equal, hence the != test.
+ver_lt() {
+    [ "$1" != "$2" ] && [ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | head -1)" = "$1" ]
+}
+
+# tmux 3.2+ for display-popup, which the picker is built on.
+TMUX_VER=$(tmux -V 2>/dev/null | sed -n 's/^tmux \([0-9][0-9.]*\).*/\1/p')
+if [ -n "$TMUX_VER" ] && ver_lt "$TMUX_VER" "3.2"; then
+    error "tmux $TMUX_VER is too old — display-popup needs 3.2+"
+    exit 1
+fi
+info "tmux ${TMUX_VER:-unknown} (3.2+ required)"
+
+# fzf 0.30+ for the --bind event names and --preview-window flags the picker uses.
+FZF_VER=$(fzf --version 2>/dev/null | sed -n 's/^\([0-9][0-9.]*\).*/\1/p')
+if [ -n "$FZF_VER" ] && ver_lt "$FZF_VER" "0.30"; then
+    error "fzf $FZF_VER is too old — the picker needs 0.30+"
+    exit 1
+fi
+info "fzf ${FZF_VER:-unknown} (0.30+ required)"
+
+# Python 3.11+ for tomllib, used to read the config file.
+if ! python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)' 2>/dev/null; then
+    error "python3 $(python3 -V 2>&1 | awk '{print $2}') is too old — 3.11+ required (tomllib)"
+    exit 1
+fi
+info "python3 $(python3 -V 2>&1 | awk '{print $2}') (3.11+ required)"
+
+# nc is optional: the status bar prefers it for speed but falls back to Python.
+if command -v nc &>/dev/null && nc -h 2>&1 | grep -q -- '-U'; then
+    info "nc found (with -U; status bar will use the fast path)"
+else
+    warn "nc missing or lacks -U — the status bar will use a slower Python fallback"
+fi
+
 # 2. Create directories
 step "Creating directories..."
 mkdir -p "$STATUS_DIR"
 info "Status directory: $STATUS_DIR"
 
 # 3. Find eligible agents
+#
+# Kiro is optional: plenty of users run only Claude Code. Skip this section when
+# there's no Kiro install rather than exiting, or a Claude-only user would get no
+# Claude hooks, no status bar, and no keybind — the rest of setup lives below.
 step "Finding Kiro agents..."
-if [ ! -d "$AGENTS_DIR" ]; then
-    warn "No agents directory at $AGENTS_DIR"
-    exit 0
-fi
-
 ELIGIBLE=()
 ELIGIBLE_LABELS=()
-for f in "$AGENTS_DIR"/*.json; do
-    [ -f "$f" ] || continue
-    jq empty "$f" 2>/dev/null || continue
-    has_hooks "$f" && continue
-    ELIGIBLE+=("$f")
-    ELIGIBLE_LABELS+=("$(basename "$f" .json)")
-done
+if [ ! -d "$AGENTS_DIR" ]; then
+    info "No Kiro install at $AGENTS_DIR — skipping (Claude Code is configured below)"
+else
+    for f in "$AGENTS_DIR"/*.json; do
+        [ -f "$f" ] || continue
+        jq empty "$f" 2>/dev/null || continue
+        has_hooks "$f" && continue
+        ELIGIBLE+=("$f")
+        ELIGIBLE_LABELS+=("$(basename "$f" .json)")
+    done
+fi
 
-if [ "${#ELIGIBLE[@]}" -eq 0 ]; then
+if [ ! -d "$AGENTS_DIR" ]; then
+    :   # nothing to do; message already shown above
+elif [ "${#ELIGIBLE[@]}" -eq 0 ]; then
     info "All agents already have tmux-sentinel hooks"
 else
     run_picker "Select agents to add tmux-sentinel hooks to:" "${ELIGIBLE_LABELS[@]}"

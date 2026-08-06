@@ -1,0 +1,112 @@
+# Portability notes
+
+An audit of what in this codebase is specific to the author's machine or setup, and
+what other users would hit. The two blockers found have been fixed; the rest are
+recorded here rather than fixed, because each is a judgement call about how far to go
+for other people's setups.
+
+Findings were verified by reading the code and, where possible, by running it — noted
+per item. Audited at commit `76e51ae`.
+
+## Fixed
+
+- **`setup.sh` aborted for anyone without Kiro.** An `exit 0` fired when
+  `~/.kiro/agents` was missing, and it sat *before* the Claude Code hooks, the tmux
+  config, the status bar, and the keybind. A Claude-Code-only user — probably most
+  users — got nothing installed, after a message that looked like success. The Kiro
+  section is now skipped rather than fatal. Verified by running setup against a fake
+  `$HOME` with no Kiro: it now installs all 5 Claude hooks and completes.
+
+- **`bin/status_client.sh` required `nc -U`.** Talking to a Unix socket from a shell
+  isn't portable: `nc -U` works on BSD netcat (macOS) and OpenBSD netcat, but GNU
+  netcat-traditional — still default on some Linux distros — has no `-U` at all. The
+  status bar would have silently shown nothing, with no clue why, while the daemon ran
+  fine. There's now a Python socket fallback, with `nc` still preferred when available
+  (~11ms vs ~54ms, and this runs on every status-bar refresh). Verified both paths
+  return byte-identical output. Fixing this also caught a latent bug: the old
+  `if [ $? -ne 0 ]` tested the exit status of the enclosing `if`, not of the query.
+
+- **No version checks.** tmux 3.2+ (`display-popup`), fzf 0.30+ (the `--bind` event
+  names and `--preview-window` flags the picker uses), and Python 3.11+ (`tomllib`)
+  are all required, and all failed at *keypress* with cryptic errors rather than at
+  install. `setup.sh` now gates on each. (The first version-comparison I wrote was
+  inverted — it passed 3.1 and rejected 3.3 — so the `ver_lt` helper is deliberately
+  explicit about the equality case.)
+
+## Open — worth knowing, not yet addressed
+
+### Agent detection is process-name based
+
+`tmux_sentinel/process.py:47,49,116-119` matches command lines containing
+`kiro-cli`+`chat`, or `/claude` (excluding `otelcol`). Verified by reading.
+
+A user whose Claude binary is wrapped in a shell function, invoked via an alias, or
+launched under a different name won't be detected: their panes show `[---]` and get no
+status tracking at all. The failure is silent and looks like the tool not working.
+
+Now that `config.toml` exists, the match patterns could move there. Until then it's
+worth documenting the assumption in the README.
+
+### Screen-scrape patterns assume Claude Code's current English UI
+
+`manifests/claude.toml`. Verified by reading; the patterns are strings like
+`ask a question or describe a task`, `shift+tab to cycle`, `manual mode on`,
+`requires approval`, `esc to interrupt`.
+
+Consequences for others: a non-English locale matches nothing, so panes never
+classify as idle or waiting; and any Claude Code UI change breaks detection until the
+manifest is updated. This is inherent to screen-scraping and is *why* the patterns
+live in editable TOML rather than in code — but nothing tells a user that, or that
+they're expected to adapt them. The README should say so.
+
+Related: `_WORKING_MARKER` in `tmux_sentinel_daemon/poll.py` was deliberately made
+verb-agnostic (commit `877828e`) for exactly this reason — it matches the *shape* of
+the status line rather than enumerating Claude's rotating gerunds, which would rot.
+The manifest patterns have no equivalent protection.
+
+### Glyph and font assumptions
+
+`tmux_sentinel/picker.py:52` uses emoji for agent icons (`👻` Kiro, `🟠` Claude), and
+the picker uses `►`, `●`, `…` plus box-drawing in places. Verified by reading.
+
+Fine in any modern terminal; garbled in a bare Linux console, over some SSH setups, or
+without emoji font coverage. Emoji are also double-width, which `_display_width`
+handles — but only for East-Asian-wide characters, so a terminal that renders them
+single-width would misalign the columns. Candidates for `config.toml`, with an
+ASCII-only fallback set.
+
+### Tests reference the author's paths
+
+`tests/test_picker.py:333-362` hardcodes `/Users/cjkent` in `_shorten_path`
+assertions. Verified: **these are not a portability problem** — `_shorten_path` takes
+`home` as a parameter, so the tests pass on any machine. They just read oddly to a
+contributor. `tests/test_picker.py:113` does use the real `os.path.expanduser("~")`,
+which is environment-coupled but correct anywhere.
+
+### Assumes the user wants their tmux config edited
+
+`setup.sh` and `bin/set-popup-size.sh` both write to `~/.tmux.conf`, and setup
+overwrites `status-right` wholesale rather than composing with an existing value.
+Verified by reading. Setup does ask before persisting the keybind, but a user with a
+carefully-built status bar would lose it. Worth preserving any existing `status-right`
+content, or at least warning.
+
+## Checked and OK
+
+- **No hardcoded personal paths in any code.** `setup.sh` derives `REPO_DIR` from its
+  own location, and the absolute paths in the author's `~/.tmux.conf` are *generated*
+  from that — correct by construction, not baked in. Verified by grep across all
+  tracked `.py`/`.sh`/`.toml`.
+- **No macOS-only tools.** No `osascript`, `pbcopy`, `gsed`, `stat -f`, `date -r`.
+- **No `sed -i`** anywhere, which is the classic BSD-vs-GNU trap (`sed -i ''` on macOS
+  vs `sed -i` on GNU). `bin/set-popup-size.sh` uses a temp file and `mv` instead.
+- **No bash 4+ constructs.** No `mapfile`/`readarray`, associative arrays, or `${v^^}`.
+  All shell scripts parse under macOS's `/bin/bash` 3.2, which was verified explicitly
+  — `mapfile` had in fact been used and was removed for this reason.
+- **`ps -eo pid,ppid,args`** (`tmux_sentinel/process.py`) is POSIX-portable.
+- **Amazon-internal vocabulary** (`DvRcs*`, `PVRF-*`, `mainline`, `/Volumes/workplace`)
+  appears only in test fixtures and one explanatory comment at `picker.py:104-107`.
+  None of it is in logic.
+- **`~/workplace` symlink handling is generic** — `_home_symlink_targets` reads
+  whatever symlinks exist in `$HOME`; it isn't a hardcoded list.
+- **Python is stdlib-only**, no pip dependencies.
