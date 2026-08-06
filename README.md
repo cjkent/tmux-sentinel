@@ -95,7 +95,13 @@ The hook rings the terminal bell (`\a`) when an agent's turn ends. Combined with
 
 ## Configuration
 
-Optional. Copy `config.toml.example` to `~/.tmux-sentinel/config.toml` and change what you want — every setting has a default, so a partial file is fine and a missing one means defaults throughout. See the example for the full list: picker column caps, preview width and length, and the daemon's poll intervals. The picker reads it on every open; changing a poll interval needs a daemon restart.
+Optional. Every setting has a default, so a partial file is fine and a missing one means defaults throughout. Settings cover the picker's column caps, the preview's width and length, and the daemon's poll intervals — see `config.toml.example` for the full annotated list. The picker reads the file on every open; changing a poll interval needs a daemon restart.
+
+```bash
+./bin/edit-config.sh
+```
+
+Opens `~/.tmux-sentinel/config.toml` in `$EDITOR`, creating it from the annotated example on first use, and reports any TOML syntax error on exit (an unparseable file is silently ignored in favour of defaults, so it's worth knowing).
 
 The popup's **width and height are not in this file.** tmux fixes a popup's size when it opens the popup, before the picker process exists, so the geometry has to live in the tmux binding. To change it:
 
@@ -103,7 +109,16 @@ The popup's **width and height are not in this file.** tmux fixes a popup's size
 ./bin/set-popup-size.sh
 ```
 
-It prompts for width and height (defaulting to your current values), updates the binding in `~/.tmux.conf` so it persists, and re-binds the running tmux server so it applies immediately.
+It prompts for width and height (defaulting to your current values), updates the binding in `~/.tmux.conf` so it persists, and re-binds the running tmux server. Only lines binding the picker are touched, so other tools' popups are left alone.
+
+Both scripts can be bound to keys so they open in a popup themselves:
+
+```tmux
+bind -n M-, display-popup -w 80% -h 80% -E "/path/to/tmux-sentinel/bin/edit-config.sh"
+bind -n M-. display-popup -w 60% -h 30% -E "TMUX_SENTINEL_IN_POPUP=1 /path/to/tmux-sentinel/bin/set-popup-size.sh"
+```
+
+`TMUX_SENTINEL_IN_POPUP=1` makes the resize script wait for a keypress before closing, so you can read the confirmation. Note a resize can't affect the popup it was requested from — tmux fixes a popup's geometry when it opens — so the new size shows up the next time you open the picker.
 
 ## Setup
 

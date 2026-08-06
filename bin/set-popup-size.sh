@@ -68,10 +68,20 @@ if tmux info &>/dev/null; then
     grep 'display-popup.*picker\.py' "$CONF" >"$live"
     if tmux source-file "$live" 2>/dev/null; then
         echo "Re-bound $(wc -l <"$live" | tr -d ' ') picker key(s) in the running server."
+        echo "The new size takes effect the next time you open the picker."
     else
         echo "Could not re-bind the running server; the new size applies on restart." >&2
     fi
     rm -f "$live"
 else
     echo "(No tmux server running — the new size applies next time it starts.)"
+fi
+
+# When run inside a popup (from its own keybind), the output would vanish the instant
+# the script exits. Hold the window open so the confirmation is readable. Note this
+# popup keeps whatever size it was opened at — tmux fixes a popup's geometry when it
+# opens, so a resize can't affect the window it was requested from.
+if [ -n "${TMUX_SENTINEL_IN_POPUP:-}" ]; then
+    printf '\nPress Enter to close...'
+    read -r _
 fi

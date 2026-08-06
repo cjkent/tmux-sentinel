@@ -349,10 +349,11 @@ else
         || error "tmux rejected key '$KEY' — leaving picker unbound"
 fi
 
-echo -n "  Make this persist across tmux restarts (write to ~/.tmux.conf)? [Y/n] "
+TMUX_CONF="$HOME/.tmux.conf"
+
+echo -n "  Make this persist across tmux restarts (write to $TMUX_CONF)? [Y/n] "
 read -r persist
 if [[ "${persist:-Y}" =~ ^[Yy]$ ]]; then
-    TMUX_CONF="$HOME/.tmux.conf"
     MARKER="# tmux-sentinel: agent picker keybind"
     if [ "$PREFIXED" -eq 1 ]; then
         BIND_LINE="bind-key $KEY display-popup -w 85% -h 70% -E \"PYTHONPATH=$REPO_DIR python3 -S $REPO_DIR/tmux_sentinel/picker.py\""
@@ -375,8 +376,21 @@ fi
 
 step "Setup complete!"
 echo ""
-echo -e "  Picker:     ${BOLD}Ctrl+b a${NC}"
+# Report the key actually chosen above, not a hardcoded one.
+if [ "$PREFIXED" -eq 1 ]; then
+    echo -e "  Picker:     ${BOLD}prefix + $KEY${NC}"
+else
+    echo -e "  Picker:     ${BOLD}$KEY${NC} (standalone)"
+fi
 echo -e "  Status bar: agent summary on the right"
 echo -e "  Bell:       window tab highlights red on done/waiting/error"
+echo -e "  In picker:  ${BOLD}?${NC} toggles a preview of the highlighted pane"
+echo ""
+echo -e "  Settings:    ${BOLD}bin/edit-config.sh${NC}      (opens ~/.tmux-sentinel/config.toml in \$EDITOR)"
+echo -e "  Popup size:  ${BOLD}bin/set-popup-size.sh${NC}   (edits the tmux binding; not a config setting)"
+echo ""
+echo -e "  Optional keybinds for those — add to ${BOLD}$TMUX_CONF${NC}:"
+echo "    bind -n M-, display-popup -w 80% -h 80% -E \"$REPO_DIR/bin/edit-config.sh\""
+echo "    bind -n M-. display-popup -w 60% -h 30% -E \"TMUX_SENTINEL_IN_POPUP=1 $REPO_DIR/bin/set-popup-size.sh\""
 echo ""
 echo -e "  To remove hooks: ${BOLD}$(basename "$0") --remove-hooks${NC}"
