@@ -46,21 +46,23 @@ from tmux_sentinel.formatting import (
     elapsed, status_label, colorize_status, align_columns,
     RED, RESET,
 )
+from tmux_sentinel.config import get_int, get_str
 
 
 _AGENT_ICONS = {"kiro": "👻", "claude": "🟠"}
 
-# Names are the free-text column, so they get the tightest cap: Claude's live task
-# titles ramble ("Investigate the 5xx errors reported in the ticket…"), and the
-# session column now needs room of its own.
-_MAX_TITLE_LEN = 28
-_MAX_SESSION_LEN = 20
-_MAX_CWD_LEN = 50
+# Column caps, all overridable from ~/.tmux-sentinel/config.toml. Names are the
+# free-text column, so they get the tightest default: Claude's live task titles
+# ramble ("Investigate the 5xx errors reported in the ticket…"), and the session
+# column needs room of its own.
+_MAX_TITLE_LEN = get_int("max_name_len", 28)
+_MAX_SESSION_LEN = get_int("max_session_len", 20)
+_MAX_CWD_LEN = get_int("max_cwd_len", 50)
 
 # How many leading path segments to keep when eliding the middle of a long path.
 # "~" is a segment but not a meaningful one, so a path starting with it keeps an
 # extra segment to reach the same depth.
-_CWD_HEAD_SEGMENTS = 2
+_CWD_HEAD_SEGMENTS = get_int("cwd_head_segments", 2)
 
 
 def _truncate(text: str, limit: int) -> str:
@@ -495,7 +497,9 @@ def main() -> None:
     # Field 2 is the target pane id, stored without the "%" tmux wants, so the
     # placeholder gets a literal "%" in front of it. The pane's tail is the useful
     # part (current output, prompt, any approval request), so capture and tail it.
-    preview_cmd = "tmux capture-pane -ep -t %{2} 2>/dev/null | tail -n 40"
+    preview_lines = get_int("preview_lines", 40)
+    preview_width = get_str("preview_width", "50%")
+    preview_cmd = f"tmux capture-pane -ep -t %{{2}} 2>/dev/null | tail -n {preview_lines}"
 
     fzf_args = [
         "fzf",
@@ -520,7 +524,7 @@ def main() -> None:
         # whatever scrolled past 40 lines ago. Note the fzf actions for this
         # (preview-bottom) don't work bound to start/load: they race the async
         # preview render, so the window flag is the reliable way to do it.
-        "--preview-window=right:50%,follow,hidden",
+        f"--preview-window=right:{preview_width},follow,hidden",
         "--bind", f"ctrl-x:execute-silent({close_cmd})+reload({reload_cmd})",
         "--bind", f"?:toggle-preview+execute-silent({toggle_preview_cmd})",
     ]

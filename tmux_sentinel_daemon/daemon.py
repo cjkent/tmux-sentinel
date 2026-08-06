@@ -42,6 +42,7 @@ from tmux_sentinel.tmux import (
     capture_pane_tail, list_sessions,
 )
 from tmux_sentinel.hook import handle_event
+from tmux_sentinel.config import get_float
 
 from tmux_sentinel_daemon.state import DaemonState
 from tmux_sentinel_daemon.poll import run_poll
@@ -57,8 +58,8 @@ LOCK_FILE = SOCK_DIR / "daemon.lock"
 # promotes it — see the IDLE branch in poll.run_poll. 30s was long enough to feel
 # broken; 10s keeps the worst case brief while still being a cheap background rate
 # when nothing is running.
-POLL_INTERVAL_IDLE = 10.0
-POLL_INTERVAL_ACTIVE = 5.0
+POLL_INTERVAL_IDLE = get_float("poll_interval_idle", 10.0)
+POLL_INTERVAL_ACTIVE = get_float("poll_interval_active", 5.0)
 
 log = logging.getLogger("tmux-sentinel-daemon")
 

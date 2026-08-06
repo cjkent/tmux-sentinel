@@ -93,9 +93,21 @@ Counts reflect *other* windows only — the focused window is excluded, since yo
 
 The hook rings the terminal bell (`\a`) when an agent's turn ends. Combined with tmux's bell monitoring (`monitor-bell on`, `bell-action other`), this highlights the window tab in red until you visit it.
 
+## Configuration
+
+Optional. Copy `config.toml.example` to `~/.tmux-sentinel/config.toml` and change what you want — every setting has a default, so a partial file is fine and a missing one means defaults throughout. See the example for the full list: picker column caps, preview width and length, and the daemon's poll intervals. The picker reads it on every open; changing a poll interval needs a daemon restart.
+
+The popup's **width and height are not in this file.** tmux fixes a popup's size when it opens the popup, before the picker process exists, so the geometry has to live in the tmux binding. To change it:
+
+```bash
+./bin/set-popup-size.sh
+```
+
+It prompts for width and height (defaulting to your current values), updates the binding in `~/.tmux.conf` so it persists, and re-binds the running tmux server so it applies immediately.
+
 ## Setup
 
-Prerequisites: Python 3.8+, `jq`, `fzf`, `tmux`.
+Prerequisites: Python 3.11+, `jq`, `fzf`, `tmux`.
 
 ```bash
 ./setup.sh
@@ -145,7 +157,7 @@ tmux-sentinel/
 
 ## Dependencies
 
-- **Python 3.8+** — stdlib only, no pip packages.
+- **Python 3.11+** — stdlib only, no pip packages. (3.11 for `tomllib`, used to read the config file.)
 - **fzf** — fuzzy finder, used for the window picker popup.
 - **jq** — used by `setup.sh` for agent config manipulation.
 - **tmux** — obviously.

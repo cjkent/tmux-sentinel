@@ -1,0 +1,49 @@
+# tmux-sentinel configuration — copy to ~/.tmux-sentinel/config.toml
+#
+# Every setting is optional; the values below are the defaults. An absent,
+# partial, or malformed file falls back to these, so you only need to list what
+# you want to change.
+#
+# The picker reads this on every open, so changes take effect immediately.
+# Changing the poll intervals needs a daemon restart to take effect.
+#
+# NOT here: the popup's width and height. tmux fixes a popup's size before the
+# picker starts, so that lives in the tmux binding instead — run
+# bin/set-popup-size.sh to change it.
+
+# --- Picker columns -------------------------------------------------------
+# Caps on the three free-text columns, in characters. Columns are padded to the
+# widest value present, so a cap stops one long entry from indenting every row.
+
+# Window/task name. Claude's live task titles ramble, hence the tight default.
+max_name_len = 28
+
+# Session name.
+max_session_len = 20
+
+# Working directory. Over this, the middle is elided:
+#   ~/workplace/PVRF-820/…/DvRcsCalculationServiceCDK
+max_cwd_len = 50
+
+# How many leading path segments to keep when eliding. The first segments name
+# the project, the last names the package; it's the middle that's boilerplate.
+# Deeply nested layouts (Brazil workspaces) want 2; a flat ~/src/* wants 1.
+# Note "~" and a leading "/" don't count, so the depth is of real segments.
+cwd_head_segments = 2
+
+# --- Preview pane (toggled with ? in the picker) ---------------------------
+
+# Width of the preview, as an fzf size: a percentage or a column count.
+preview_width = "50%"
+
+# How many lines of the pane to show. The view is anchored to the bottom, since
+# that's where the current output and any prompt are.
+preview_lines = 40
+
+# --- Daemon ---------------------------------------------------------------
+# Seconds between polls. The daemon polls faster when an agent is working, and
+# the idle interval bounds how long a hookless turn can show the wrong status.
+# Requires a daemon restart.
+
+poll_interval_active = 5.0
+poll_interval_idle = 10.0

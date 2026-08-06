@@ -4,9 +4,10 @@ Screen-scrape manifest loader.
 Loads pattern files from the manifests/ directory and provides a function
 to classify pane state based on the captured terminal text.
 
-The manifest format is a small, TOML-flavoured subset — enough to express
-the rules we need without depending on tomllib (which only exists in Python
-3.11+; this project targets stdlib-only and must run under system python 3.9):
+The manifest format is a small, TOML-flavoured subset, parsed by hand here for
+historical reasons: it predates the project requiring Python 3.11+. Now that
+tomllib is available (see tmux_sentinel/config.py), this parser could be replaced
+with it — the format below is already valid TOML.
 
     # comment
     [[rule]]
