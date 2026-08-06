@@ -13,16 +13,29 @@ if [ -z "$PANE_ID" ]; then
     exit 0
 fi
 
-# Talking to a Unix socket from a shell isn't portable: `nc -U` works with BSD netcat
-# (macOS) and OpenBSD netcat, but GNU netcat-traditional — still the default on some
-# Linux distros — has no -U flag at all. Without a fallback the status bar just shows
-# nothing there, with no clue why.
+# Talking to a Unix socket from a shell isn't portable. Most nc builds do support it:
+# openbsd-netcat (Debian/Ubuntu/Arch default) and nmap-ncat (Fedora/RHEL default) both
+# have -U, as does BSD netcat on macOS. Only netcat-traditional lacks it entirely.
 #
-# nc is preferred when it works because it's ~11ms against ~54ms for starting a Python
-# interpreter, and this runs on every status-bar refresh.
+# nc is much preferred where available — ~11ms against ~54ms to start a Python
+# interpreter — and this runs on every status-bar refresh, so it's worth detecting
+# properly rather than assuming.
+#
+# Detection probes behaviour instead of parsing --help: help output formats differ
+# (macOS lists flags one per line, OpenBSD and nmap print a compact cluster like
+# "[-46bCDdFhklNnrStUuvZz]"), and a naive grep for "-U" misses the cluster form —
+# which would send most Linux users down the slow path for no reason. Instead, run
+# nc -U against a path that cannot exist: a build lacking the flag reports an invalid
+# option, while one supporting it gets as far as failing to find the socket.
 HAVE_NC_U=0
-if command -v nc >/dev/null 2>&1 && nc -h 2>&1 | grep -q -- '-U'; then
-    HAVE_NC_U=1
+if command -v nc >/dev/null 2>&1; then
+    nc_probe=$(nc -U /nonexistent/tmux-sentinel-probe </dev/null 2>&1)
+    case "$nc_probe" in
+        *"illegal option"*|*"invalid option"*|*"unrecognized option"*|*"usage:"*)
+            HAVE_NC_U=0 ;;
+        *)
+            HAVE_NC_U=1 ;;
+    esac
 fi
 
 query() {

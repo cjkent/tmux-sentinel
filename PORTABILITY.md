@@ -18,13 +18,23 @@ per item. Audited at commit `76e51ae`.
   `$HOME` with no Kiro: it now installs all 5 Claude hooks and completes.
 
 - **`bin/status_client.sh` required `nc -U`.** Talking to a Unix socket from a shell
-  isn't portable: `nc -U` works on BSD netcat (macOS) and OpenBSD netcat, but GNU
-  netcat-traditional — still default on some Linux distros — has no `-U` at all. The
-  status bar would have silently shown nothing, with no clue why, while the daemon ran
-  fine. There's now a Python socket fallback, with `nc` still preferred when available
-  (~11ms vs ~54ms, and this runs on every status-bar refresh). Verified both paths
-  return byte-identical output. Fixing this also caught a latent bug: the old
-  `if [ $? -ne 0 ]` tested the exit status of the enclosing `if`, not of the query.
+  isn't portable. In practice most builds are fine — openbsd-netcat (Debian/Ubuntu/Arch
+  default) and nmap-ncat (Fedora/RHEL default) both support `-U`, as does BSD netcat on
+  macOS; only netcat-traditional lacks it. But with no fallback, those users got a
+  status bar that silently showed nothing while the daemon ran fine. There's now a
+  Python socket fallback, with `nc` preferred where available (~11ms vs ~54ms, and this
+  runs on every status-bar refresh). Both paths verified byte-identical.
+
+  The detection needed a second pass. The first version grepped `nc --help` for `-U`,
+  which only matches macOS's one-flag-per-line format: OpenBSD and nmap print a compact
+  cluster like `[-46bCDdFhklNnrStUuvZz]`, so **most Linux users would have been sent
+  down the slow Python path despite having a perfectly good `nc`**. Detection now probes
+  behaviour instead — run `nc -U` against a path that cannot exist, and check whether it
+  complains about an invalid option (no support) or about the missing socket (supported).
+  Verified against simulated netcat-traditional, openbsd-netcat, and nmap-ncat.
+
+  Fixing this also caught a latent bug: the old `if [ $? -ne 0 ]` tested the exit status
+  of the enclosing `if`, not of the query.
 
 - **No version checks.** tmux 3.2+ (`display-popup`), fzf 0.30+ (the `--bind` event
   names and `--preview-window` flags the picker uses), and Python 3.11+ (`tomllib`)

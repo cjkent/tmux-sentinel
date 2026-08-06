@@ -217,10 +217,19 @@ fi
 info "python3 $(python3 -V 2>&1 | awk '{print $2}') (3.11+ required)"
 
 # nc is optional: the status bar prefers it for speed but falls back to Python.
-if command -v nc &>/dev/null && nc -h 2>&1 | grep -q -- '-U'; then
-    info "nc found (with -U; status bar will use the fast path)"
+# Probes behaviour rather than parsing --help, since help formats differ and a naive
+# grep for "-U" misses the compact flag cluster that OpenBSD and nmap netcat print.
+# See the same detection in bin/status_client.sh.
+if command -v nc &>/dev/null; then
+    NC_PROBE=$(nc -U /nonexistent/tmux-sentinel-probe </dev/null 2>&1)
+    case "$NC_PROBE" in
+        *"illegal option"*|*"invalid option"*|*"unrecognized option"*|*"usage:"*)
+            warn "nc lacks -U — the status bar will use a slower Python fallback" ;;
+        *)
+            info "nc supports -U (status bar will use the fast path)" ;;
+    esac
 else
-    warn "nc missing or lacks -U — the status bar will use a slower Python fallback"
+    warn "nc not found — the status bar will use a slower Python fallback"
 fi
 
 # 2. Create directories
