@@ -33,69 +33,61 @@ HOOK_CMD="PYTHONPATH=$REPO_DIR python3 -S $REPO_DIR/tmux_sentinel/hook.py"
 AGENTS_DIR="$HOME/.kiro/agents"
 STATUS_DIR="$HOME/.tmux-sentinel/status"
 
-# Interactive checkbox picker with keyboard navigation.
-# Renders a list of items with [x] checkboxes. All items start checked.
-# Controls: ↑↓ navigate, space toggle, a select all, n select none, enter confirm.
-# Sets PICKER_RESULT to space-separated list of selected indices (0-based).
-# Uses tput to hide cursor during redraws and single-shot printf for flicker-free rendering.
+# Multi-select picker, delegated to fzf rather than hand-rolled.
+#
+# This used to be ~60 lines of raw terminal handling — tput civis, single-byte reads,
+# manual ANSI escape decoding for arrow keys, cursor-up redraws. fzf is already a hard
+# dependency and does all of it natively.
+#
+# Everything starts selected via load:select-all, matching the old behaviour where
+# pressing Enter accepts the lot (the common case).
+#
+# Sets PICKER_RESULT to a space-separated list of selected indices (0-based).
+#
+# The one subtlety: with --multi, Enter on an *empty* selection returns the item under
+# the cursor rather than nothing, so "I want none of these" cannot be expressed by
+# deselecting everything — it's Esc, which fzf reports as exit 130. Treating that as an
+# empty result is what stops setup from hooking an agent the user just deselected.
 run_picker() {
     local prompt="$1"; shift
     local labels=("$@")
-    local count=${#labels[@]}
-    local checked=() cursor=0
 
-    for ((i=0; i<count; i++)); do checked[$i]=1; done
-
-    # Hide cursor, restore on exit
-    tput civis 2>/dev/null
-    trap 'tput cnorm 2>/dev/null' RETURN
-
-    echo "  $prompt"
-
-    # Initial draw
-    local buf=""
-    for ((i=0; i<count; i++)); do
-        local m="[ ]" p="  "
-        [ "${checked[$i]}" -eq 1 ] && m="[x]"
-        [ "$i" -eq "$cursor" ] && p="▸ "
-        buf+="${p}${m} ${labels[$i]}"$'\n'
+    # Indices travel through fzf as a hidden first field, so the visible list stays
+    # clean while the caller still gets positions back rather than having to re-match
+    # labels (which could be ambiguous if two agents shared a name).
+    local input="" i=0
+    for label in "${labels[@]}"; do
+        input+="${i}"$'\t'"${label}"$'\n'
+        i=$((i + 1))
     done
-    buf+="  ↑↓ move · space toggle · a all · n none · enter confirm"
-    printf '%s\n' "$buf"
 
-    while true; do
-        IFS= read -rsn1 key
-        case "$key" in
-            $'\x1b')
-                read -rsn2 seq
-                case "$seq" in
-                    '[A') ((cursor > 0)) && ((cursor--)) || true ;;
-                    '[B') ((cursor < count - 1)) && ((cursor++)) || true ;;
-                esac ;;
-            ' ') [ "${checked[$cursor]}" -eq 1 ] && checked[$cursor]=0 || checked[$cursor]=1 ;;
-            'a') for ((i=0; i<count; i++)); do checked[$i]=1; done ;;
-            'n') for ((i=0; i<count; i++)); do checked[$i]=0; done ;;
-            '') break ;;
-            *) continue ;;
-        esac
-
-        # Redraw: move up, rebuild buffer, print in one shot
-        printf '\033[%dA' "$((count + 1))"
-        buf=""
-        for ((i=0; i<count; i++)); do
-            local m="[ ]" p="  "
-            [ "${checked[$i]}" -eq 1 ] && m="[x]"
-            [ "$i" -eq "$cursor" ] && p="▸ "
-            buf+="\033[2K${p}${m} ${labels[$i]}"$'\n'
-        done
-        buf+="\033[2K  ↑↓ move · space toggle · a all · n none · enter confirm"
-        printf '%b\n' "$buf"
-    done
+    # `|| true` matters: Esc makes fzf exit non-zero, and under `set -e` that would
+    # kill setup outright instead of being read as "the user chose nothing".
+    local out status
+    out=$(printf '%s' "$input" | fzf \
+        --multi \
+        --sync \
+        --no-sort \
+        --reverse \
+        --delimiter=$'\t' \
+        --with-nth=2 \
+        --height="~100%" \
+        --prompt="  " \
+        --header="$prompt
+  tab: toggle · ctrl-a: all · ctrl-d: none · enter: confirm · esc: skip" \
+        --bind 'load:select-all' \
+        --bind 'ctrl-a:select-all' \
+        --bind 'ctrl-d:deselect-all' 2>/dev/null) && status=0 || status=$?
 
     PICKER_RESULT=""
-    for ((i=0; i<count; i++)); do
-        [ "${checked[$i]}" -eq 1 ] && PICKER_RESULT+="$i "
-    done
+    # 130 is Esc/interrupt. Anything non-zero means "no selection", and stdout must be
+    # ignored — see the note above about Enter falling back to the cursor item.
+    if [ "$status" -ne 0 ]; then
+        return 0
+    fi
+    while IFS=$'\t' read -r idx _; do
+        [ -n "$idx" ] && PICKER_RESULT+="$idx "
+    done <<< "$out"
 }
 
 # All JSON manipulation lives in tmux_sentinel.install. It used to be jq filters
