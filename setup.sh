@@ -98,35 +98,26 @@ run_picker() {
     done
 }
 
-# Check if an agent config already has our hooks in all 5 events.
-# Matches hooks whose command path contains "tmux-sentinel/...notify.sh".
-# Returns 0 (true) if all 5 events have our hook, 1 (false) otherwise.
-has_hooks() {
-    local f="$1"
-    local count
-    count=$(jq '[.hooks.agentSpawn, .hooks.userPromptSubmit, .hooks.preToolUse, .hooks.postToolUse, .hooks.stop | select(. != null) | map(select(.command | test("tmux_sentinel.*hook\\.py"))) | select(length > 0)] | length' "$f" 2>/dev/null)
-    [ "$count" -eq 5 ]
-}
+# All JSON manipulation lives in tmux_sentinel.install. It used to be jq filters
+# assembled as bash strings, which meant regexes under four levels of escaping and no
+# way to test them in isolation — and jq was a dependency needed for setup alone,
+# since nothing else in the project used it.
+INSTALL="PYTHONPATH=$REPO_DIR python3 -S -m tmux_sentinel.install"
 
 # --- Remove hooks mode ---
-# Strips tmux-sentinel hook entries from selected agent configs.
-# Uses jq to filter out entries whose command contains "notify.sh",
-# then cleans up empty hook arrays and objects.
+# Strips tmux-sentinel hook entries from selected agent configs, leaving any hooks the
+# user added themselves untouched.
 if [ "${1:-}" = "--remove-hooks" ]; then
     echo -e "${BOLD}tmux-sentinel — remove hooks${NC}"
     echo ""
 
     HOOKED=()
     HOOKED_LABELS=()
-    for f in "$AGENTS_DIR"/*.json; do
-        [ -f "$f" ] || continue
-        jq empty "$f" 2>/dev/null || continue
-        jq -e '.hooks' "$f" >/dev/null 2>&1 || continue
-        if jq -e '[.hooks[][] | select(.command | test("notify.sh|hook.py"))] | length > 0' "$f" >/dev/null 2>&1; then
-            HOOKED+=("$f")
-            HOOKED_LABELS+=("$(basename "$f" .json)")
-        fi
-    done
+    while IFS= read -r f; do
+        [ -n "$f" ] || continue
+        HOOKED+=("$f")
+        HOOKED_LABELS+=("$(basename "$f" .json)")
+    done < <(eval "$INSTALL --list-kiro-hooked")
 
     if [ "${#HOOKED[@]}" -eq 0 ]; then
         info "No agents have tmux-sentinel hooks"
@@ -135,35 +126,26 @@ if [ "${1:-}" = "--remove-hooks" ]; then
 
     run_picker "Select agents to remove hooks from:" "${HOOKED_LABELS[@]}"
 
-    EVENTS="agentSpawn userPromptSubmit preToolUse postToolUse stop"
-    REMOVED=0
+    SELECTED=()
     for idx in $PICKER_RESULT; do
-        f="${HOOKED[$idx]}"
-        jq_filter='.'
-        for evt in $EVENTS; do
-            jq_filter+=" | if .hooks.${evt} then .hooks.${evt} = [.hooks.${evt}[] | select(.command | test(\"notify.sh|hook.py\") | not)] else . end"
-            jq_filter+=" | if .hooks.${evt} == [] then del(.hooks.${evt}) else . end"
-        done
-        jq_filter+=' | if .hooks == {} then del(.hooks) else . end'
-        result=$(jq "$jq_filter" "$f" 2>/dev/null) && echo "$result" > "$f" && ((REMOVED++)) || true
+        SELECTED+=("${HOOKED[$idx]}")
     done
+    REMOVED=0
+    if [ "${#SELECTED[@]}" -gt 0 ]; then
+        REMOVED=$(eval "$INSTALL --remove-kiro" "$(printf '%q ' "${SELECTED[@]}")")
+    fi
     info "Removed hooks from $REMOVED agents"
 
     # Also remove from Claude Code settings
     CLAUDE_SETTINGS="$HOME/.claude/settings.json"
-    if [ -f "$CLAUDE_SETTINGS" ] && jq -e '.hooks // {} | to_entries[] | .value[]?.hooks[]? | select(.command | test("tmux_sentinel.*hook\\.py"))' "$CLAUDE_SETTINGS" >/dev/null 2>&1; then
+    if eval "$INSTALL --claude-has-hook"; then
         echo -n "  Also remove hooks from Claude Code settings? [Y/n] "
         read -r answer
         if [ "${answer:-Y}" != "n" ] && [ "${answer:-Y}" != "N" ]; then
-            CC_EVENTS="SessionStart UserPromptSubmit PreToolUse PostToolUse Stop"
-            jq_filter='.'
-            for evt in $CC_EVENTS; do
-                jq_filter+=" | if .hooks.${evt} then .hooks.${evt} = [.hooks.${evt}[] | .hooks = [.hooks[] | select(.command | test(\"tmux_sentinel.*hook\\\\.py\") | not)] | select(.hooks | length > 0)] else . end"
-                jq_filter+=" | if .hooks.${evt} == [] then del(.hooks.${evt}) else . end"
-            done
-            jq_filter+=' | if .hooks == {} then del(.hooks) else . end'
-            result=$(jq "$jq_filter" "$CLAUDE_SETTINGS" 2>/dev/null) && echo "$result" > "$CLAUDE_SETTINGS"
-            info "Removed hooks from Claude Code settings"
+            cp "$CLAUDE_SETTINGS" "$CLAUDE_SETTINGS.backup.$(date +%Y%m%d%H%M%S)"
+            eval "$INSTALL --remove-claude" \
+                && info "Removed hooks from Claude Code settings" \
+                || error "Could not update $CLAUDE_SETTINGS"
         fi
     fi
     exit 0
@@ -178,7 +160,7 @@ echo ""
 # Versions are checked, not just presence: the features below fail at keypress with
 # cryptic errors rather than at install time, which is a miserable way to find out.
 step "Checking dependencies..."
-for cmd in jq fzf tmux python3; do
+for cmd in fzf tmux python3; do
     if command -v "$cmd" &>/dev/null; then
         info "$cmd found"
     else
@@ -221,7 +203,9 @@ info "python3 $(python3 -V 2>&1 | awk '{print $2}') (3.11+ required)"
 # grep for "-U" misses the compact flag cluster that OpenBSD and nmap netcat print.
 # See the same detection in bin/status_client.sh.
 if command -v nc &>/dev/null; then
-    NC_PROBE=$(nc -U /nonexistent/tmux-sentinel-probe </dev/null 2>&1)
+    # The probe is expected to fail — the socket path doesn't exist. Guard the
+    # assignment with `|| true` so `set -e` doesn't treat that as fatal.
+    NC_PROBE=$(nc -U /nonexistent/tmux-sentinel-probe </dev/null 2>&1) || true
     case "$NC_PROBE" in
         *"illegal option"*|*"invalid option"*|*"unrecognized option"*|*"usage:"*)
             warn "nc lacks -U — the status bar will use a slower Python fallback" ;;
@@ -248,13 +232,11 @@ ELIGIBLE_LABELS=()
 if [ ! -d "$AGENTS_DIR" ]; then
     info "No Kiro install at $AGENTS_DIR — skipping (Claude Code is configured below)"
 else
-    for f in "$AGENTS_DIR"/*.json; do
-        [ -f "$f" ] || continue
-        jq empty "$f" 2>/dev/null || continue
-        has_hooks "$f" && continue
+    while IFS= read -r f; do
+        [ -n "$f" ] || continue
         ELIGIBLE+=("$f")
         ELIGIBLE_LABELS+=("$(basename "$f" .json)")
-    done
+    done < <(eval "$INSTALL --list-kiro-eligible")
 fi
 
 if [ ! -d "$AGENTS_DIR" ]; then
@@ -265,8 +247,8 @@ else
     run_picker "Select agents to add tmux-sentinel hooks to:" "${ELIGIBLE_LABELS[@]}"
 
     # Backup agent configs before modifying, then inject our hook into
-        # all 5 lifecycle events. The jq filter is idempotent — it only adds
-        # our hook if it's not already present (checked via regex on the command path).
+        # all 5 lifecycle events. Adding is idempotent — an existing copy of our
+        # hook is replaced rather than duplicated.
     SELECTED=()
     for idx in $PICKER_RESULT; do
         SELECTED+=("${ELIGIBLE[$idx]}")
@@ -277,18 +259,8 @@ else
         cp -r "$AGENTS_DIR/" "$BACKUP_DIR"
         info "Backup created at $BACKUP_DIR"
 
-        EVENTS="agentSpawn userPromptSubmit preToolUse postToolUse stop"
-        UPDATED=0
-        for f in "${SELECTED[@]}"; do
-            jq_filter='. | if .hooks == null then .hooks = {} else . end'
-            for evt in $EVENTS; do
-                jq_filter+=" | if .hooks.${evt} then .hooks.${evt} = [.hooks.${evt}[] | select(.command | test(\"tmux-sentinel/.*notify\\\\.sh\") | not)] else . end"
-                jq_filter+=" | if (.hooks.${evt} // [] | map(select(.command | test(\"tmux_sentinel.*hook\\\\.py\"))) | length) == 0"
-                jq_filter+=" then .hooks.${evt} = (.hooks.${evt} // []) + [{\"command\": \"${HOOK_CMD}\", \"description\": \"tmux-sentinel status tracking\"}]"
-                jq_filter+=" else . end"
-            done
-            result=$(jq "$jq_filter" "$f" 2>/dev/null) && echo "$result" > "$f" && ((UPDATED++)) || true
-        done
+        UPDATED=$(eval "$INSTALL --add-kiro" "$(printf '%q ' "${SELECTED[@]}")" \
+            "--command $(printf '%q' "$HOOK_CMD")")
         info "Hooked $UPDATED agents"
     else
         warn "No agents selected"
@@ -300,41 +272,25 @@ step "Configuring Claude Code..."
 CLAUDE_SETTINGS="$HOME/.claude/settings.json"
 CC_EVENTS="SessionStart UserPromptSubmit PreToolUse PostToolUse Stop"
 
-if [ -f "$CLAUDE_SETTINGS" ]; then
-    if jq -e '.hooks // {} | to_entries[] | .value[]?.hooks[]? | select(.command | test("tmux_sentinel.*hook\\.py"))' "$CLAUDE_SETTINGS" >/dev/null 2>&1; then
-        info "Claude Code hooks already configured"
-    else
-        echo -n "  Add tmux-sentinel hooks to Claude Code? [Y/n] "
-        read -r answer
-        if [ "${answer:-Y}" != "n" ] && [ "${answer:-Y}" != "N" ]; then
-            cp "$CLAUDE_SETTINGS" "$CLAUDE_SETTINGS.backup.$(date +%Y%m%d%H%M%S)"
-
-            jq_filter='. | if .hooks == null then .hooks = {} else . end'
-            for evt in $CC_EVENTS; do
-                jq_filter+=" | .hooks.${evt} = (.hooks.${evt} // [])"
-                jq_filter+=" | if ([.hooks.${evt}[] | .hooks[]? | select(.command | test(\"tmux_sentinel.*hook\\\\.py\"))] | length) == 0"
-                jq_filter+=" then .hooks.${evt} += [{\"matcher\": \"\", \"hooks\": [{\"type\": \"command\", \"command\": \"${HOOK_CMD}\"}]}]"
-                jq_filter+=" else . end"
-            done
-
-            result=$(jq "$jq_filter" "$CLAUDE_SETTINGS" 2>/dev/null) && echo "$result" > "$CLAUDE_SETTINGS"
-            info "Claude Code hooks configured in $CLAUDE_SETTINGS"
-        fi
-    fi
+if eval "$INSTALL --claude-has-hook"; then
+    info "Claude Code hooks already configured"
 else
-    echo -n "  Create Claude Code settings with tmux-sentinel hooks? [Y/n] "
+    if [ -f "$CLAUDE_SETTINGS" ]; then
+        PROMPT="  Add tmux-sentinel hooks to Claude Code? [Y/n] "
+    else
+        PROMPT="  Create Claude Code settings with tmux-sentinel hooks? [Y/n] "
+    fi
+    echo -n "$PROMPT"
     read -r answer
     if [ "${answer:-Y}" != "n" ] && [ "${answer:-Y}" != "N" ]; then
-        mkdir -p "$(dirname "$CLAUDE_SETTINGS")"
-        echo '{}' > "$CLAUDE_SETTINGS"
-
-        jq_filter='. | .hooks = {}'
-        for evt in $CC_EVENTS; do
-            jq_filter+=" | .hooks.${evt} = [{\"matcher\": \"\", \"hooks\": [{\"type\": \"command\", \"command\": \"${HOOK_CMD}\"}]}]"
-        done
-
-        result=$(jq "$jq_filter" "$CLAUDE_SETTINGS" 2>/dev/null) && echo "$result" > "$CLAUDE_SETTINGS"
-        info "Created $CLAUDE_SETTINGS with hooks"
+        # Back up only an existing file; --add-claude creates one if absent.
+        [ -f "$CLAUDE_SETTINGS" ] \
+            && cp "$CLAUDE_SETTINGS" "$CLAUDE_SETTINGS.backup.$(date +%Y%m%d%H%M%S)"
+        if eval "$INSTALL --add-claude --command $(printf '%q' "$HOOK_CMD")"; then
+            info "Claude Code hooks configured in $CLAUDE_SETTINGS"
+        else
+            error "Could not update $CLAUDE_SETTINGS"
+        fi
     fi
 fi
 

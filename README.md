@@ -122,7 +122,7 @@ bind -n M-. display-popup -w 60% -h 30% -E "TMUX_SENTINEL_IN_POPUP=1 /path/to/tm
 
 ## Setup
 
-Prerequisites: Python 3.11+, `jq`, `fzf`, `tmux`.
+Prerequisites: Python 3.11+, `fzf`, `tmux`. (`nc` optional — see below.)
 
 ```bash
 ./setup.sh
@@ -157,11 +157,13 @@ tmux-sentinel/
 │   ├── tmux.py                # Tmux command wrappers
 │   ├── formatting.py          # Column alignment, ANSI colors, elapsed time
 │   ├── hook.py                # Hook entry point (Kiro CLI + Claude Code)
+│   ├── config.py              # Optional user settings (config.toml)
+│   ├── install.py             # Hook add/remove in agent JSON configs
 │   ├── statusbar.py           # Status bar polling entry point
 │   └── picker.py              # fzf window picker entry point
 ├── setup.sh                   # Interactive installer (bash)
 ├── tests/
-│   ├── test_*.py              # Python tests (46)
+│   ├── test_*.py              # Python tests (186)
 │   └── test-*.sh              # Bash tests (56, for legacy scripts)
 ├── hooks/                     # Old bash hook (preserved as fallback)
 │   └── notify.sh
@@ -174,5 +176,5 @@ tmux-sentinel/
 
 - **Python 3.11+** — stdlib only, no pip packages. (3.11 for `tomllib`, used to read the config file.)
 - **fzf** — fuzzy finder, used for the window picker popup.
-- **jq** — used by `setup.sh` for agent config manipulation.
+- **nc** (optional) — the status bar uses it to query the daemon when available; falls back to a Python socket client otherwise.
 - **tmux** — obviously.
