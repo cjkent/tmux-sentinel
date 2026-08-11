@@ -53,6 +53,26 @@ Additional flag files per pane:
 
 Plus one global UI-state file, `~/.tmux-sentinel/preview` — present when the picker's preview pane should open showing.
 
+### Daemon
+
+`tmux_sentinel_daemon/` runs a small background process holding all agent state in
+memory, listening on a Unix socket at `~/.tmux-sentinel/daemon.sock`. It's the
+authoritative source while running; the status files remain as a fallback.
+
+It starts itself — `bin/status_client.sh` spawns one if none is running, so the status
+bar's next refresh brings it back. There's nothing to install or supervise.
+
+Two things use it:
+- **Hooks** forward their events to it (`hook_client.py`), so state updates need no file I/O.
+- **The picker** fetches a whole snapshot in one round trip (`client.py`), avoiding a
+  process-tree walk and a `capture-pane` per pane. This is the difference between a
+  popup that opens in ~90ms and one that takes ~300ms.
+
+It also polls, every 5s while an agent is working and every 10s otherwise, to catch
+what hooks can't tell it: agents that exited, and turns that ended without a `Stop`
+event (an interrupt, say). That correction is a screen-scrape driven by the patterns in
+`manifests/`.
+
 ### Stale File Cleanup
 
 Status files are cleaned up on every read (by the picker and status bar). A pane's files are removed if:
@@ -65,17 +85,21 @@ Process detection uses a single `ps` snapshot + BFS tree walk from each pane's s
 
 `tmux_sentinel/picker.py` is an fzf popup bound to a configurable key (`Alt+Space` by default). It:
 
-1. Cleans up stale status files
-2. Lists all windows across all tmux sessions
-3. Reads status files for agent panes, falls back to tmux's `pane_current_path` for non-agent windows
-4. Aligns columns using Python string formatting (no external `column` command)
-5. Colorizes status labels with ANSI codes: green=idle, yellow=working, purple=waiting, red=error
-6. Shows the session name as a column on every row, ordered by session (so rows still group by session, but every row is a real fzf target — a query like `myproj waiting` narrows correctly, where a header row could only match itself)
-7. Marks the focused pane with `►` in a leading marker column
-8. Shows a red `●` dot in that same marker column for panes with unseen status changes (the focused pane is always seen, so the two never clash — keeping "where am I" and "what needs attention" vertically aligned)
-9. On selection, focuses that exact pane (split panes are individually selectable, since targets are pane ids rather than `session:window`)
+1. Fetches a state snapshot from the daemon in one round trip, falling back to direct file + `ps` inspection if the daemon is down
+2. Lists all panes across all tmux sessions
+3. Cleans up status files for panes the daemon no longer tracks
+4. Falls back to tmux's `pane_current_path` for non-agent panes
+5. Aligns columns using Python string formatting (no external `column` command)
+6. Colorizes status labels with ANSI codes: green=idle, blue=working, purple=waiting, red=error
+7. Shows the session name as a column on every row, ordered by session (so rows still group by session, but every row is a real fzf target — a query like `myproj waiting` narrows correctly, where a header row could only match itself)
+8. Marks the focused pane with `►` in a leading marker column
+9. Shows a red `●` dot in that same marker column for panes with unseen status changes (the focused pane is always seen, so the two never clash — keeping "where am I" and "what needs attention" vertically aligned)
+10. On selection, focuses that exact pane (split panes are individually selectable, since targets are pane ids rather than `session:window`)
 
-Press `?` to toggle a preview pane showing the last 40 lines of the highlighted pane — useful for reading an agent's current output or a pending approval prompt without switching to it. It's hidden by default, and the choice persists between popups (remembered in `~/.tmux-sentinel/preview`).
+Keys inside the picker:
+- `enter` — focus the selected pane
+- `?` — toggle a preview of the highlighted pane, anchored to the bottom where the current output and any prompt are. Hidden by default, and the choice persists between popups (remembered in `~/.tmux-sentinel/preview`). Its width and line count are configurable.
+- `ctrl-x` — close the highlighted pane (tmux closes the window with its last pane)
 
 Elapsed time is shown only for working agents — it reflects time since the user's last prompt, useful for spotting stuck agents.
 
@@ -122,20 +146,22 @@ bind -n M-. display-popup -w 60% -h 30% -E "TMUX_SENTINEL_IN_POPUP=1 /path/to/tm
 
 ## Setup
 
-Prerequisites: Python 3.11+, `fzf`, `tmux`. (`nc` optional — see below.)
+Prerequisites: Python 3.11+, fzf 0.30+, tmux 3.2+. (`nc` optional — see below.) Setup checks all three versions, since these features fail at keypress rather than at install if they're too old.
 
 ```bash
 ./setup.sh
 ```
 
+Kiro and Claude Code are both optional: setup skips whichever you don't have.
+
 The setup script:
 
 1. Checks that dependencies are installed
 2. Creates `~/.tmux-sentinel/status/`
-3. Presents an interactive checkbox picker of your Kiro agent configs (`~/.kiro/agents/*.json`)
+3. Presents an fzf multi-select of your Kiro agent configs (`~/.kiro/agents/*.json`), everything pre-selected — Enter accepts all, Tab deselects, Esc skips
 4. Backs up the selected configs and injects hook entries for all 5 lifecycle events
-5. Removes any old bash hooks if present
-6. Offers to inject hooks into Claude Code settings (`~/.claude/settings.json`)
+5. Replaces the old bash hook (`notify.sh`) if an earlier version installed it
+6. Offers to inject hooks into Claude Code settings (`~/.claude/settings.json`), creating the file if absent and leaving any hooks of your own untouched
 7. Configures tmux: bell monitoring, status bar, and the picker keybinding (default `Alt+Space`, standalone — no tmux prefix needed; you can accept the default or choose your own during setup)
 
 To remove hooks from agent configs:
@@ -144,14 +170,16 @@ To remove hooks from agent configs:
 ./setup.sh --remove-hooks
 ```
 
-Note: tmux options set by setup don't persist across tmux restarts. Add them to `~/.tmux.conf` to make them permanent.
+Setup offers to write the picker keybinding to `~/.tmux.conf` so it survives a tmux
+restart. The other tmux options it sets (bell monitoring, `status-right`, poll
+interval) are runtime-only — add them to `~/.tmux.conf` yourself if you want them
+permanent.
 
 ## File Structure
 
 ```
 tmux-sentinel/
-├── tmux_sentinel/               # Python package (active)
-│   ├── __init__.py
+├── tmux_sentinel/             # Core package
 │   ├── status.py              # Status file I/O, flags, cleanup
 │   ├── process.py             # Agent process detection via ps tree walk
 │   ├── tmux.py                # Tmux command wrappers
@@ -159,22 +187,39 @@ tmux-sentinel/
 │   ├── hook.py                # Hook entry point (Kiro CLI + Claude Code)
 │   ├── config.py              # Optional user settings (config.toml)
 │   ├── install.py             # Hook add/remove in agent JSON configs
-│   ├── statusbar.py           # Status bar polling entry point
 │   └── picker.py              # fzf window picker entry point
+├── tmux_sentinel_daemon/      # Long-running state daemon
+│   ├── daemon.py              # Socket server + poll loop
+│   ├── state.py               # In-memory per-pane state
+│   ├── poll.py                # Process walk + screen-scrape correction
+│   ├── manifests.py           # Loads the screen-scrape patterns
+│   ├── client.py              # Picker's state-snapshot client
+│   ├── hook_client.py         # Hook's event-forwarding client
+│   └── status_format.py       # Status-bar string rendering
+├── manifests/                 # Screen-scrape patterns, one file per agent
+│   ├── claude.toml
+│   └── kiro.toml
 ├── setup.sh                   # Interactive installer (bash)
-├── tests/
-│   ├── test_*.py              # Python tests (186)
-│   └── test-*.sh              # Bash tests (56, for legacy scripts)
-├── hooks/                     # Old bash hook (preserved as fallback)
-│   └── notify.sh
-└── bin/                       # Old bash scripts (preserved as fallback)
-    ├── picker.sh
-    └── status-bar.sh
+├── config.toml.example        # Annotated default settings
+├── bin/
+│   ├── status_client.sh       # status-right client (lazy-starts the daemon)
+│   ├── edit-config.sh         # Opens config.toml in $EDITOR
+│   └── set-popup-size.sh      # Changes the popup geometry in the tmux binding
+└── tests/
+    ├── test_*.py              # Python tests (186)
+    └── test-*.sh              # Bash tests (picker + setup)
 ```
 
 ## Dependencies
 
 - **Python 3.11+** — stdlib only, no pip packages. (3.11 for `tomllib`, used to read the config file.)
-- **fzf** — fuzzy finder, used for the window picker popup.
+- **fzf 0.30+** — fuzzy finder, used for the window picker popup and setup's multi-select.
 - **nc** (optional) — the status bar uses it to query the daemon when available; falls back to a Python socket client otherwise.
-- **tmux** — obviously.
+- **tmux 3.2+** — obviously. 3.2 is where `display-popup` arrived, which the picker is built on.
+
+## Further Reading
+
+- [ARCHITECTURE.md](ARCHITECTURE.md) — module-by-module design notes
+- [DAEMON-DESIGN.md](DAEMON-DESIGN.md) — why the daemon exists and how it's structured
+- [PORTABILITY.md](PORTABILITY.md) — what's specific to the author's setup, and what other users may hit
+- [TODO.md](TODO.md) — ideas, known issues, and planned work
