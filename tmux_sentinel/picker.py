@@ -497,9 +497,24 @@ def main() -> None:
     # Field 2 is the target pane id, stored without the "%" tmux wants, so the
     # placeholder gets a literal "%" in front of it. The pane's tail is the useful
     # part (current output, prompt, any approval request), so capture and tail it.
+    #
+    # The awk strips *trailing* blank lines. capture-pane pads its output to the full
+    # pane height, so a pane holding two lines of output in a 30-row pane emits 30
+    # lines — 2 real, 28 empty. Since the preview window is anchored to the bottom
+    # ("follow" below), those blanks are what you'd be looking at: the preview reads
+    # as empty even though the content is sitting just above. Buffering and replaying
+    # up to the last non-blank line keeps interior blanks, which carry real structure
+    # in agent output, and drops only the padding.
     preview_lines = get_int("preview_lines", 40)
     preview_width = get_str("preview_width", "50%")
-    preview_cmd = f"tmux capture-pane -ep -t %{{2}} 2>/dev/null | tail -n {preview_lines}"
+    trim_trailing_blanks = (
+        "awk '{ b[NR]=$0; if (NF) last=NR } END { for (i=1;i<=last;i++) print b[i] }'"
+    )
+    preview_cmd = (
+        f"tmux capture-pane -ep -t %{{2}} 2>/dev/null"
+        f" | {trim_trailing_blanks}"
+        f" | tail -n {preview_lines}"
+    )
 
     fzf_args = [
         "fzf",
