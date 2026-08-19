@@ -63,13 +63,18 @@ def _parse_manifest(text: str) -> list[dict]:
 
 
 def load_manifest(path: Path) -> list[Rule]:
-    """Load rules from a manifest file."""
+    """Load rules from a manifest file.
+
+    Patterns are compiled with re.MULTILINE, since they match against a multi-line
+    screen capture and are naturally line-oriented — "^" should mean "start of a
+    line", which is what a rule anchoring to a particular row needs.
+    """
     entries = _parse_manifest(path.read_text())
     rules = []
     for entry in entries:
         state = entry["state"]
-        pattern = re.compile(entry["pattern"])
-        exclude = re.compile(entry["exclude"]) if "exclude" in entry else None
+        pattern = re.compile(entry["pattern"], re.MULTILINE)
+        exclude = re.compile(entry["exclude"], re.MULTILINE) if "exclude" in entry else None
         rules.append(Rule(state=state, pattern=pattern, exclude=exclude))
     return rules
 

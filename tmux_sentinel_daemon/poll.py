@@ -47,9 +47,24 @@ def _detect_pane_state(pane_id: str, agent_type: str = "claude") -> str | None:
 # prose that merely quotes it (a pane discussing this very regex would trip it).
 # The "…(" is what makes it *live*: a completed turn reads "Crunched for 1m 9s",
 # with no ellipsis and no parenthesis.
+#
+# A third form covers background agents. The main agent can sit idle at an empty
+# prompt while a background agent works, and its footer then looks completely idle —
+# so without this the pane reads IDL even though work is happening. Those rows appear
+# below the footer as:
+#
+#     ⏺ main
+#     ◯ kairos-V2331008326  Analyse this oncall ticket…    1m 3s · ↓ 132.0k tokens
+#
+# The "◯" alone is not enough: the row *persists after the agent finishes*, so keying
+# off the glyph would strand the pane on WORKING indefinitely. What goes away is the
+# trailing duration — a finished row keeps the name and task but drops the timer. So
+# the row must carry a duration to count as live. Note the timer here is bare
+# ("1m 3s"), not parenthesised, which is why the two patterns above miss it.
 _WORKING_MARKER = re.compile(
     r"^[ \t]*\S[ \t]+\w+…[ \t]*\(\d"
-    r"|esc to interrupt",
+    r"|esc to interrupt"
+    r"|^[ \t]*◯[ \t]+\S.*?\b\d+[hms]\b",
     re.MULTILINE,
 )
 

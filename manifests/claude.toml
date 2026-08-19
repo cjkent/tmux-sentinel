@@ -27,7 +27,15 @@ pattern = '''ask a question or describe a task'''
 # elapsed timer (\(\d+[ms]) is the reliable marker: it's present for the whole
 # turn regardless of spinner verb or whether a token counter has appeared yet,
 # and never shows when idle.
+#
+# The third alternative vetoes on a running *background* agent. The main agent can be
+# idle at an empty prompt — footer and all — while a background agent works, listed
+# below the footer as "◯ <name>  <task>…    1m 3s · ↓ 132.0k tokens". Without this
+# veto the pane classifies as idle, and since poll.py demotes a WORKING pane whenever
+# the scrape says idle, it would flip-flop and raise a spurious unseen flag each time.
+# The row must carry a duration: it persists after the agent finishes, but the timer
+# does not, so "◯ plus a duration" is what distinguishes running from finished.
 [[rule]]
 state = "idle"
 pattern = '''shift\+tab to cycle|\? for shortcuts|manual mode on'''
-exclude = '''esc to interrupt|\(\d+[hms]'''
+exclude = '''esc to interrupt|\(\d+[hms]|^[ \t]*◯[ \t]+\S.*?\b\d+[hms]\b'''

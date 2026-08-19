@@ -28,6 +28,49 @@ def test_marker_tolerates_leading_whitespace():
     assert _has_working_marker("  ✻ Working… (35s · ↓ 1.1k tokens)")
 
 
+_BG_FOOTER = "  ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents\n  ⏺ main\n"
+_BG_RUNNING = _BG_FOOTER + "  ◯ kairos-V123  Analyse this oncall ticket…    1m 3s · ↓ 132.0k tokens"
+_BG_FINISHED = _BG_FOOTER + "  ◯ kairos-V123  Analyse this oncall ticket…"
+
+
+def test_marker_detects_running_background_agent():
+    # The main agent can sit idle at an empty prompt — footer and all — while a
+    # background agent works. Without this the pane reads IDL despite work happening.
+    # Note the timer is bare ("1m 3s"), not parenthesised, so the spinner patterns
+    # can't see it.
+    assert _has_working_marker(_BG_RUNNING)
+
+
+def test_marker_rejects_finished_background_agent():
+    # The ◯ row *persists* after the agent finishes — only the trailing duration
+    # goes. Keying off the glyph alone would strand the pane on WORKING forever.
+    assert not _has_working_marker(_BG_FINISHED)
+
+
+def test_background_agent_vetoes_the_idle_rule():
+    # poll.py demotes a WORKING pane whenever the scrape says idle, so if the manifest
+    # still called this idle the pane would flip-flop and raise a spurious unseen flag
+    # on every cycle.
+    from tmux_sentinel_daemon.manifests import load_all_manifests, classify
+    rules = load_all_manifests()["claude"]
+    assert classify(_BG_RUNNING, rules) is None
+    assert classify(_BG_FINISHED, rules) == IDLE
+
+
+def test_poll_promotes_pane_with_running_background_agent():
+    state = DaemonState()
+    state.ensure("7").status = IDLE
+    _run_poll_with({"7": _BG_RUNNING}, state)
+    assert state.get("7").status == WORKING
+
+
+def test_poll_leaves_pane_idle_when_background_agent_finished():
+    state = DaemonState()
+    state.ensure("7").status = IDLE
+    _run_poll_with({"7": _BG_FINISHED}, state)
+    assert state.get("7").status == IDLE
+
+
 def test_marker_rejects_pattern_quoted_in_prose():
     # A pane showing text *about* the spinner format (a conversation discussing this
     # very regex, say) must not read as working. The match is anchored to the start
