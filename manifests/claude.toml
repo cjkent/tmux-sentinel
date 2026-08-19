@@ -33,9 +33,12 @@ pattern = '''ask a question or describe a task'''
 # below the footer as "◯ <name>  <task>…    1m 3s · ↓ 132.0k tokens". Without this
 # veto the pane classifies as idle, and since poll.py demotes a WORKING pane whenever
 # the scrape says idle, it would flip-flop and raise a spurious unseen flag each time.
-# The row must carry a duration: it persists after the agent finishes, but the timer
-# does not, so "◯ plus a duration" is what distinguishes running from finished.
+#
+# A running row ends in an elapsed time; a finished one ends in the literal "idle" (or
+# nothing). The row persists either way, so that trailing status is the only signal.
+# Not keyed to the ◯/⏺ glyph: those mark which entry is focused in the list, not which
+# agent is running, and they swap as you move between agents.
 [[rule]]
 state = "idle"
 pattern = '''shift\+tab to cycle|\? for shortcuts|manual mode on'''
-exclude = '''esc to interrupt|\(\d+[hms]|^[ \t]*◯[ \t]+\S.*?\b\d+[hms]\b'''
+exclude = '''esc to interrupt|\(\d+[hms]|^[ \t]*[◯⏺][ \t]+\S+[ \t]{2,}.*?\b\d+[hms]\b[ \t]*(?:·|$)'''

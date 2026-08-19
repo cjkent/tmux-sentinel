@@ -30,7 +30,9 @@ def test_marker_tolerates_leading_whitespace():
 
 _BG_FOOTER = "  ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents\n  ⏺ main\n"
 _BG_RUNNING = _BG_FOOTER + "  ◯ kairos-V123  Analyse this oncall ticket…    1m 3s · ↓ 132.0k tokens"
-_BG_FINISHED = _BG_FOOTER + "  ◯ kairos-V123  Analyse this oncall ticket…"
+# A finished agent's row ends in the literal "idle"; the row itself persists.
+_BG_FINISHED = _BG_FOOTER + "  ◯ kairos-V123  Analyse this oncall ticket…    idle"
+_BG_FINISHED_BLANK = _BG_FOOTER + "  ◯ kairos-V123  Analyse this oncall ticket…"
 
 
 def test_marker_detects_running_background_agent():
@@ -42,9 +44,27 @@ def test_marker_detects_running_background_agent():
 
 
 def test_marker_rejects_finished_background_agent():
-    # The ◯ row *persists* after the agent finishes — only the trailing duration
-    # goes. Keying off the glyph alone would strand the pane on WORKING forever.
+    # The row *persists* after the agent finishes; the trailing elapsed time is
+    # replaced by "idle". Keying off the glyph alone would strand the pane on WORKING.
     assert not _has_working_marker(_BG_FINISHED)
+    assert not _has_working_marker(_BG_FINISHED_BLANK)
+
+
+def test_marker_ignores_the_focus_glyph():
+    # ◯ vs ⏺ marks which entry is *focused* in the agent list, not which is running,
+    # and they swap as you move between agents. An earlier version of this pattern
+    # assumed ◯ meant "running" and was wrong.
+    assert _has_working_marker(_BG_RUNNING.replace("◯", "⏺"))
+    assert not _has_working_marker(_BG_FINISHED.replace("◯", "⏺"))
+
+
+def test_marker_rejects_transcript_lines_with_durations():
+    # Ordinary transcript output also starts with ⏺ and can mention a duration; only
+    # the agent-list rows (name, then a wide gap, then the status) should match.
+    assert not _has_working_marker("⏺ Bash(cd /x && sleep 3s)")
+    assert not _has_working_marker("⏺ Done in 5s — all tests pass")
+    assert not _has_working_marker("⏺ Teammate @kairos-V123 finished")
+    assert not _has_working_marker("  ⏺ main")
 
 
 def test_background_agent_vetoes_the_idle_rule():
