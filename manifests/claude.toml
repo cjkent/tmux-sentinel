@@ -37,8 +37,16 @@ pattern = '''ask a question or describe a task'''
 # A running row ends in an elapsed time; a finished one ends in the literal "idle" (or
 # nothing). The row persists either way, so that trailing status is the only signal.
 # Not keyed to the ◯/⏺ glyph: those mark which entry is focused in the list, not which
-# agent is running, and they swap as you move between agents.
+# agent is running, and they swap as you move between agents. The "❯ " prefix is
+# optional because it's a transient navigation cursor — present only while the user is
+# moving between agents, on whichever row is highlighted.
+#
+# "to select · Enter to view" is the footer of the agent-list view, which replaces the
+# usual mode footer while the user browses agents. Without it no idle rule matches
+# there, so classify returns None; poll.py reads that as "unknown" and leaves a WORKING
+# pane alone, stranding it on WRK after the background agent finished. The exclude
+# above still covers the running case, so treating this footer as idle is safe.
 [[rule]]
 state = "idle"
-pattern = '''shift\+tab to cycle|\? for shortcuts|manual mode on'''
-exclude = '''esc to interrupt|\(\d+[hms]|^[ \t]*[◯⏺][ \t]+\S+[ \t]{2,}.*?\b\d+[hms]\b[ \t]*(?:·|$)'''
+pattern = '''shift\+tab to cycle|\? for shortcuts|manual mode on|to select · Enter to view'''
+exclude = '''esc to interrupt|\(\d+[hms]|^[ \t]*(?:❯[ \t]+)?[◯⏺][ \t]+\S+[ \t]{2,}.*?\b\d+[hms]\b[ \t]*(?:·|$)'''

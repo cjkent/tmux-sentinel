@@ -67,6 +67,34 @@ def test_marker_rejects_transcript_lines_with_durations():
     assert not _has_working_marker("  ⏺ main")
 
 
+# Browsing the agent list swaps the usual mode footer for this one.
+_LIST_VIEW = "  Opus 5 | Context: 8%\n  ↑/↓ to select · Enter to view\n\n"
+
+
+def test_agent_list_view_footer_reads_as_idle():
+    # Without this footer being recognised, no idle rule matched in the list view, so
+    # classify returned None. poll.py treats None as "unknown" and leaves a WORKING
+    # pane alone — stranding it on WRK after the background agent finished, for as long
+    # as the view stayed open.
+    from tmux_sentinel_daemon.manifests import load_all_manifests, classify
+    rules = load_all_manifests()["claude"]
+    assert classify(_LIST_VIEW + "  ⏺ main\n  ◯ kairos  task…    idle", rules) == IDLE
+    # Still vetoed while the agent is actually running.
+    assert classify(
+        _LIST_VIEW + "  ⏺ main\n  ◯ kairos  task…    1m 3s · ↓ 132k tokens", rules) is None
+
+
+def test_marker_tolerates_the_navigation_cursor():
+    # "❯ " is a transient cursor shown on the highlighted row while the user moves
+    # between agents. A capture taken mid-navigation shouldn't change the verdict.
+    running = "  ◯ kairos  task…    1m 3s · ↓ 132k tokens"
+    assert _has_working_marker(_LIST_VIEW + running)
+    assert _has_working_marker(_LIST_VIEW + "❯" + running[1:])
+    finished = "  ◯ kairos  task…    idle"
+    assert not _has_working_marker(_LIST_VIEW + finished)
+    assert not _has_working_marker(_LIST_VIEW + "❯" + finished[1:])
+
+
 def test_background_agent_vetoes_the_idle_rule():
     # poll.py demotes a WORKING pane whenever the scrape says idle, so if the manifest
     # still called this idle the pane would flip-flop and raise a spurious unseen flag

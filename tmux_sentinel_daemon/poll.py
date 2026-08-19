@@ -68,10 +68,15 @@ def _detect_pane_state(pane_id: str, agent_type: str = "claude") -> str | None:
 # matching ordinary transcript lines (those start with ⏺ too, but are followed by
 # prose). The timer is bare rather than parenthesised, which is why the two patterns
 # above can't see it.
+#
+# The "❯ " prefix is optional because it's a transient navigation cursor: it appears
+# only while the user is moving between agents, on whichever row is highlighted. Most
+# captures won't have it, but if one lands mid-navigation with the running agent
+# highlighted, the line anchor would miss the row and the pane would read idle.
 _WORKING_MARKER = re.compile(
     r"^[ \t]*\S[ \t]+\w+…[ \t]*\(\d"
     r"|esc to interrupt"
-    r"|^[ \t]*[◯⏺][ \t]+\S+[ \t]{2,}.*?\b\d+[hms]\b[ \t]*(?:·|$)",
+    r"|^[ \t]*(?:❯[ \t]+)?[◯⏺][ \t]+\S+[ \t]{2,}.*?\b\d+[hms]\b[ \t]*(?:·|$)",
     re.MULTILINE,
 )
 
