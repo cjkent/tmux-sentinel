@@ -1,8 +1,8 @@
 """Tests for the picker's sort modes and per-mode cursor placement."""
 from tmux_sentinel.status import IDLE, WORKING, WAITING, ERROR
 from tmux_sentinel.picker import (
-    _Record, _sort_records, _cursor_row, _parse_mode,
-    _SEVERITY, _SEVERITY_NONE,
+    _Record, _sort_records, _cursor_row, _parse_mode, _lru_ranks,
+    _SEVERITY, _SEVERITY_NONE, _LRU_UNVISITED,
     MODE_UNSEEN, MODE_SESSION, MODE_MRU,
 )
 
@@ -39,11 +39,61 @@ def test_session_mode_sorts_window_index_numerically():
     assert [r.target for r in _sort_records(recs, MODE_SESSION)] == ["w9", "w10"]
 
 
-def test_mru_mode_is_most_recent_first():
-    recs = [_rec(target="old", activity=100),
-            _rec(target="new", activity=300),
-            _rec(target="mid", activity=200)]
+def test_mru_mode_orders_by_visit_not_output():
+    # The whole point: a pane that merely *printed* recently must not outrank one you
+    # actually visited. window_activity is last-output time, so ordering on it promotes
+    # chatty agents you never looked at.
+    recs = [_rec(target="visited", lru_rank=0, activity=1),
+            _rec(target="noisy", lru_rank=_LRU_UNVISITED, activity=999)]
+    assert [r.target for r in _sort_records(recs, MODE_MRU)] == ["visited", "noisy"]
+
+
+def test_mru_mode_orders_visited_panes_by_recency_of_visit():
+    recs = [_rec(target="third", lru_rank=2),
+            _rec(target="first", lru_rank=0),
+            _rec(target="second", lru_rank=1)]
+    assert [r.target for r in _sort_records(recs, MODE_MRU)] == ["first", "second", "third"]
+
+
+def test_mru_mode_falls_back_to_output_for_never_visited():
+    # A fresh install has no visit history; output time is the only signal left, and
+    # unvisited panes still sort behind anything visited.
+    recs = [_rec(target="old", lru_rank=_LRU_UNVISITED, activity=100),
+            _rec(target="new", lru_rank=_LRU_UNVISITED, activity=300),
+            _rec(target="mid", lru_rank=_LRU_UNVISITED, activity=200)]
     assert [r.target for r in _sort_records(recs, MODE_MRU)] == ["new", "mid", "old"]
+
+
+# --- LRU cache parsing -------------------------------------------------------------
+
+def test_lru_ranks_reads_most_recent_first():
+    import tempfile
+    from pathlib import Path
+    f = Path(tempfile.mkdtemp()) / "lru"
+    f.write_text("42\n17\n8\n")
+    assert _lru_ranks(f) == {"42": 0, "17": 1, "8": 2}
+
+
+def test_lru_ranks_strips_percent_and_blanks():
+    import tempfile
+    from pathlib import Path
+    f = Path(tempfile.mkdtemp()) / "lru"
+    f.write_text("%42\n\n  17  \n")
+    assert _lru_ranks(f) == {"42": 0, "17": 1}
+
+
+def test_lru_ranks_first_occurrence_wins():
+    # bump dedupes, but a stale duplicate must not demote a pane.
+    import tempfile
+    from pathlib import Path
+    f = Path(tempfile.mkdtemp()) / "lru"
+    f.write_text("5\n9\n5\n")
+    assert _lru_ranks(f)["5"] == 0
+
+
+def test_lru_ranks_missing_file_is_empty():
+    from pathlib import Path
+    assert _lru_ranks(Path("/no/such/lru")) == {}
 
 
 def test_unseen_mode_puts_unseen_first():

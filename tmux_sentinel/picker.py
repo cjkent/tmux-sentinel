@@ -162,6 +162,38 @@ def _display_name(pane: PaneInfo, agent_type: str) -> str:
     return pane.window_name
 
 
+LRU_PATH = Path.home() / ".tmux-sentinel" / "lru"
+
+# Rank given to a pane with no recorded visit. Larger than any real rank, so
+# never-visited panes sort last in "recent" order.
+_LRU_UNVISITED = 1 << 30
+
+
+def _lru_ranks(path: Path = None) -> dict[str, int]:
+    """Map pane id -> visit rank (0 = most recently visited).
+
+    Populated by bin/lru_bump.sh via tmux hooks. tmux itself has no last-visited
+    timestamp: #{window_activity} is last-*output* time, so an agent printing into a
+    window you never looked at would otherwise jump to the top of the recent list.
+    """
+    target = path or LRU_PATH
+    try:
+        lines = target.read_text().splitlines()
+    except OSError:
+        return {}
+    ranks: dict[str, int] = {}
+    for line in lines:
+        pane = line.strip().lstrip("%")
+        if not pane:
+            continue
+        # First occurrence wins: the file is most-recent-first, and bump dedupes, but
+        # a stale duplicate must not demote a pane. Rank counts entries rather than
+        # lines, so a blank line doesn't consume a position.
+        if pane not in ranks:
+            ranks[pane] = len(ranks)
+    return ranks
+
+
 @dataclass
 class _Record:
     """A display row plus the fields the sort modes order on."""
@@ -172,6 +204,8 @@ class _Record:
     activity: int
     session_index: int
     window_index: int
+    # 0 = most recently visited; _LRU_UNVISITED when never visited.
+    lru_rank: int = _LRU_UNVISITED
 
 
 # Triage order for the unseen mode: what most wants a human, first. Waiting outranks
@@ -203,10 +237,11 @@ def _sort_records(records: list[_Record], mode: str) -> list[_Record]:
     ties keep the order panes were discovered in, which is session order.
     """
     if mode == MODE_MRU:
-        # Most-recently-used first. The focused pane sorts to the top (you're active
-        # in it now); the cursor parks on the row below it, so the first switchable
-        # target is preselected. See the cursor logic in main().
-        return sorted(records, key=lambda r: -r.activity)
+        # Ordered by when you last *visited* a pane, which is what "recent" should
+        # mean. Never-visited panes fall to the back, ordered among themselves by
+        # last output — that's the best available signal for a pane the LRU cache has
+        # never seen (a fresh install, or a pane created since the cache was written).
+        return sorted(records, key=lambda r: (r.lru_rank, -r.activity))
     if mode == MODE_SESSION:
         # Reproduces the pre-modes ordering exactly: sessions in tmux's order, then
         # window index within each.
@@ -262,6 +297,9 @@ def _build_rows(
     rows: list[list[str]] = []
     targets: list[str] = []
     records: list[_Record] = []
+    # Read once rather than per pane; only the "recent" mode uses it, but the read is
+    # a single small file so it isn't worth gating.
+    lru = _lru_ranks()
 
     # Group panes by session
     sessions: dict[str, list[PaneInfo]] = {}
@@ -368,6 +406,7 @@ def _build_rows(
                 activity=p.activity,
                 session_index=session_index,
                 window_index=_as_int(p.window_index),
+                lru_rank=lru.get(p.pane_id, _LRU_UNVISITED),
             ))
 
     for rec in _sort_records(records, mode):

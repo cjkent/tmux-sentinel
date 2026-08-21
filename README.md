@@ -105,7 +105,7 @@ the active mode:
 |---|---|---|
 | `unseen` | unseen first, then by what most wants attention (waiting, error, working, idle), then recency | first unseen row |
 | `session` | session order, then window index — the original grouped order | the focused pane |
-| `mru` | most recently active first | top row, or the one below it if that's the pane you're in |
+| `mru` | most recently *visited* first | top row, or the one below it if that's the pane you're in |
 
 Launch a mode with `--mode=unseen|session|mru`; `unseen` is the default. Bind one key
 per mode, e.g.:
@@ -116,9 +116,17 @@ bind -n M-Space display-popup -w 85% -h 70% -E "… --mode=session"
 bind -n C-Tab   display-popup -w 85% -h 70% -E "… --mode=mru"
 ```
 
-Recency comes from tmux's `window_activity`, which is last-*output* time rather than
-last-focus time — so in `mru` the pane you're sitting in is often not the top row, and a
-chattier agent elsewhere outranks it.
+`mru` orders by when you last *visited* a pane. tmux has no last-visited timestamp —
+`#{window_activity}` is last-*output* time, so an agent printing into a window you never
+looked at would jump to the top. Setup therefore installs three tmux hooks
+(`after-select-window`, `after-select-pane`, `client-session-changed`) that record each
+visit to `~/.tmux-sentinel/lru`, most recent first.
+
+Those hooks are registered at index `[10]` rather than the default `[0]`, so they sit
+alongside any hooks other tools have set on the same events instead of replacing them.
+
+Panes with no recorded visit sort last, ordered among themselves by output time — so a
+fresh install still gives a sensible list before any history accumulates.
 
 Keys inside the picker:
 - `enter` — focus the selected pane

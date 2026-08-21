@@ -301,6 +301,24 @@ tmux set -g status-interval 5 2>/dev/null && info "status-interval 5s" || warn "
 # The #() syntax tells tmux to execute the command and insert its output.
 tmux set -g status-right "#($REPO_DIR/bin/status_client.sh '#{pane_id}') %H:%M" 2>/dev/null && info "status-right configured" || warn "Could not set status-right"
 
+# Visit tracking for the picker's "recent" sort mode.
+#
+# tmux has no last-*visited* timestamp — #{window_activity} is last-*output* time, so an
+# agent printing into a window you never looked at would jump to the top of a recency
+# list. These hooks record what you actually visit.
+#
+# Index [10] rather than the default [0]: other tools set these same hooks (tmux-switch
+# does), and an unindexed set-hook would silently replace theirs.
+#
+# The nested `tmux display -p` is required, not redundant: tmux expands format strings
+# in a hook command against the first attached session rather than the event's target,
+# so #{pane_id} inline would report the wrong pane for most navigation.
+LRU_HOOK="run-shell -b \"$REPO_DIR/bin/lru_bump.sh \\\"\$(tmux display -p '#{pane_id}')\\\"\""
+for hook in after-select-window after-select-pane client-session-changed; do
+    tmux set-hook -g "${hook}[10]" "$LRU_HOOK" 2>/dev/null || true
+done
+info "visit tracking hooks installed (for the picker's recent mode)"
+
 # Picker keybind — interactive: accept the default, or pick a custom one.
 # Custom keys are entered in tmux's own notation (e.g. "a", "M-Space", "C-x")
 # rather than captured as raw keystrokes, since that's fragile across
