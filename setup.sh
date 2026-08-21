@@ -305,7 +305,9 @@ tmux set -g status-right "#($REPO_DIR/bin/status_client.sh '#{pane_id}') %H:%M" 
 # Custom keys are entered in tmux's own notation (e.g. "a", "M-Space", "C-x")
 # rather than captured as raw keystrokes, since that's fragile across
 # terminals/encodings and tmux already validates its own notation for us.
-PICKER_CMD=(display-popup -w 85% -h 70% -E "PYTHONPATH=$REPO_DIR python3 -S $REPO_DIR/tmux_sentinel/picker.py")
+PICKER_CMD=(display-popup -w 85% -h 70% -E "PYTHONPATH=$REPO_DIR python3 -S $REPO_DIR/tmux_sentinel/picker.py --mode=unseen")
+# Reused when printing example binds for the other two modes.
+PICKER_BIND_BODY="display-popup -w 85% -h 70% -E \"PYTHONPATH=$REPO_DIR python3 -S $REPO_DIR/tmux_sentinel/picker.py"
 DEFAULT_KEY="M-Space"
 DEFAULT_PREFIXED=0
 
@@ -357,9 +359,9 @@ read -r persist
 if [[ "${persist:-Y}" =~ ^[Yy]$ ]]; then
     MARKER="# tmux-sentinel: agent picker keybind"
     if [ "$PREFIXED" -eq 1 ]; then
-        BIND_LINE="bind-key $KEY display-popup -w 85% -h 70% -E \"PYTHONPATH=$REPO_DIR python3 -S $REPO_DIR/tmux_sentinel/picker.py\""
+        BIND_LINE="bind-key $KEY display-popup -w 85% -h 70% -E \"PYTHONPATH=$REPO_DIR python3 -S $REPO_DIR/tmux_sentinel/picker.py --mode=unseen\""
     else
-        BIND_LINE="bind -n $KEY display-popup -w 85% -h 70% -E \"PYTHONPATH=$REPO_DIR python3 -S $REPO_DIR/tmux_sentinel/picker.py\""
+        BIND_LINE="bind -n $KEY display-popup -w 85% -h 70% -E \"PYTHONPATH=$REPO_DIR python3 -S $REPO_DIR/tmux_sentinel/picker.py --mode=unseen\""
     fi
 
     if [ -f "$TMUX_CONF" ] && grep -qF "$MARKER" "$TMUX_CONF"; then
@@ -390,7 +392,13 @@ echo ""
 echo -e "  Settings:    ${BOLD}bin/edit-config.sh${NC}      (opens ~/.tmux-sentinel/config.toml in \$EDITOR)"
 echo -e "  Popup size:  ${BOLD}bin/set-popup-size.sh${NC}   (edits the tmux binding; not a config setting)"
 echo ""
-echo -e "  Optional keybinds for those — add to ${BOLD}$TMUX_CONF${NC}:"
+echo -e "  The picker has three sort modes. The keybind above opens ${BOLD}unseen${NC} (triage);"
+echo -e "  ${BOLD}Alt-u${NC}/${BOLD}Alt-s${NC}/${BOLD}Alt-r${NC} switch mode inside the popup. To open a mode directly,"
+echo -e "  add extra binds to ${BOLD}$TMUX_CONF${NC} — e.g.:"
+echo "    bind -n M-Space $PICKER_BIND_BODY --mode=session\""
+echo "    bind -n C-Tab   $PICKER_BIND_BODY --mode=mru\""
+echo ""
+echo -e "  Optional keybinds for the settings tools:"
 echo "    bind -n M-, display-popup -w 80% -h 80% -E \"$REPO_DIR/bin/edit-config.sh\""
 echo "    bind -n M-. display-popup -w 60% -h 30% -E \"TMUX_SENTINEL_IN_POPUP=1 $REPO_DIR/bin/set-popup-size.sh\""
 echo ""

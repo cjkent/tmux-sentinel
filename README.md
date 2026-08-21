@@ -9,7 +9,7 @@ Entirely vibe-coded using Claude Code. I haven't looked at the code and neither 
 When you run multiple AI agents (Kiro CLI or Claude Code) in separate tmux windows, tmux-sentinel gives you:
 
 - **Status tracking** — know which agents are working, idle, waiting for input, or errored, without switching to each window
-- **Window picker** (`Alt+Space` by default, configurable during setup) — an fzf popup listing all windows across all sessions with agent status, working directory, git branch, and elapsed time
+- **Window picker** — an fzf popup listing all windows across all sessions with agent status, working directory, git branch, and elapsed time, in one of three sort orders
 - **Status bar summary** — a persistent indicator in `status-right` showing how many agents need attention
 - **Bell notifications** — window tabs highlight red when an agent finishes or needs input
 
@@ -83,7 +83,7 @@ Process detection uses a single `ps` snapshot + BFS tree walk from each pane's s
 
 ### Window Picker
 
-`tmux_sentinel/picker.py` is an fzf popup bound to a configurable key (`Alt+Space` by default). It:
+`tmux_sentinel/picker.py` is an fzf popup bound to a configurable key during setup. It:
 
 1. Fetches a state snapshot from the daemon in one round trip, falling back to direct file + `ps` inspection if the daemon is down
 2. Lists all panes across all tmux sessions
@@ -91,13 +91,38 @@ Process detection uses a single `ps` snapshot + BFS tree walk from each pane's s
 4. Falls back to tmux's `pane_current_path` for non-agent panes
 5. Aligns columns using Python string formatting (no external `column` command)
 6. Colorizes status labels with ANSI codes: green=idle, blue=working, purple=waiting, red=error
-7. Shows the session name as a column on every row, ordered by session (so rows still group by session, but every row is a real fzf target — a query like `myproj waiting` narrows correctly, where a header row could only match itself)
+7. Shows the session name as a column on every row rather than as a group header, so every row is a real fzf target — a query like `myproj waiting` narrows correctly, where a header row could only match itself. Row order depends on the sort mode (below)
 8. Marks the focused pane with `►` in a leading marker column
 9. Shows a red `●` dot in that same marker column for panes with unseen status changes (the focused pane is always seen, so the two never clash — keeping "where am I" and "what needs attention" vertically aligned)
 10. On selection, focuses that exact pane (split panes are individually selectable, since targets are pane ids rather than `session:window`)
 
+### Sort modes
+
+The list can be ordered three ways. Each has its own launch key, and the prompt names
+the active mode:
+
+| Mode | Order | Cursor starts on |
+|---|---|---|
+| `unseen` | unseen first, then by what most wants attention (waiting, error, working, idle), then recency | first unseen row |
+| `session` | session order, then window index — the original grouped order | the focused pane |
+| `mru` | most recently active first | top row, or the one below it if that's the pane you're in |
+
+Launch a mode with `--mode=unseen|session|mru`; `unseen` is the default. Bind one key
+per mode, e.g.:
+
+```tmux
+bind -n C-Space display-popup -w 85% -h 70% -E "PYTHONPATH=/path/to/tmux-sentinel python3 -S /path/to/tmux-sentinel/tmux_sentinel/picker.py --mode=unseen"
+bind -n M-Space display-popup -w 85% -h 70% -E "… --mode=session"
+bind -n C-Tab   display-popup -w 85% -h 70% -E "… --mode=mru"
+```
+
+Recency comes from tmux's `window_activity`, which is last-*output* time rather than
+last-focus time — so in `mru` the pane you're sitting in is often not the top row, and a
+chattier agent elsewhere outranks it.
+
 Keys inside the picker:
 - `enter` — focus the selected pane
+- `alt-u` / `alt-s` / `alt-r` — switch to unseen / session / recent order. (Alt rather than Ctrl because `ctrl-u` and `ctrl-r` are fzf's own clear-query and toggle-sort.)
 - `?` — toggle a preview of the highlighted pane, anchored to the bottom where the current output and any prompt are. Hidden by default, and the choice persists between popups (remembered in `~/.tmux-sentinel/preview`). Its width and line count are configurable.
 - `ctrl-x` — close the highlighted pane (tmux closes the window with its last pane)
 
@@ -162,7 +187,7 @@ The setup script:
 4. Backs up the selected configs and injects hook entries for all 5 lifecycle events
 5. Replaces the old bash hook (`notify.sh`) if an earlier version installed it
 6. Offers to inject hooks into Claude Code settings (`~/.claude/settings.json`), creating the file if absent and leaving any hooks of your own untouched
-7. Configures tmux: bell monitoring, status bar, and the picker keybinding (default `Alt+Space`, standalone — no tmux prefix needed; you can accept the default or choose your own during setup)
+7. Configures tmux: bell monitoring, status bar, and one picker keybinding opening `unseen` mode (default `Alt+Space`, standalone — no tmux prefix needed; you can accept the default or choose your own during setup). It then prints example binds for the other two modes
 
 To remove hooks from agent configs:
 
