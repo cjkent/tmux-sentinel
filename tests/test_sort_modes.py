@@ -183,6 +183,30 @@ def test_parse_mode():
     assert _parse_mode(["--close", "42"]) == MODE_UNSEEN
 
 
+# --- switch ordering ---------------------------------------------------------------
+
+def test_switch_to_pane_selects_window_before_switching_client():
+    """The window must be selected before the client switches sessions.
+
+    switch-client first would leave the client momentarily on whatever window that
+    session last had active, and anything watching navigation — including this
+    project's own recent-mode hooks — records that intermediate window as a visit.
+    That produced two entries per switch when only one window was visited.
+    """
+    import tmux_sentinel.tmux as tm
+    calls = []
+    orig = tm._run_tmux
+    tm._run_tmux = lambda *a: (calls.append(a), "sess")[1]
+    try:
+        tm.switch_to_pane("42")
+    finally:
+        tm._run_tmux = orig
+    verbs = [c[0] for c in calls]
+    assert "select-window" in verbs and "switch-client" in verbs
+    assert verbs.index("select-window") < verbs.index("switch-client"), verbs
+    assert verbs.index("select-pane") < verbs.index("switch-client"), verbs
+
+
 if __name__ == "__main__":
     for name, func in sorted(globals().items()):
         if name.startswith("test_") and callable(func):

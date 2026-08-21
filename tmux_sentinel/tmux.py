@@ -119,13 +119,23 @@ def switch_to_pane(pane_id: str) -> None:
     drawn and the selection being made. Selecting the window alone would leave the
     focus on whichever pane of that window last had it — which is exactly the bug
     this replaces.
+
+    Order matters. The window and pane are selected *before* switching the client, not
+    after. select-window works on a session the client isn't attached to, so this sets
+    the target session's active window while we're still elsewhere; switch-client then
+    lands directly on it.
+
+    Doing it the other way round leaves the client briefly on whatever window that
+    session last had active, and anything watching for navigation sees that
+    intermediate window as a visit. The picker's own recent-mode hooks did exactly
+    that, recording two windows per switch when only one was visited.
     """
     target = f"%{pane_id}"
     session = _run_tmux("display-message", "-p", "-t", target, "#{session_name}")
-    if session:
-        _run_tmux("switch-client", "-t", session)
     _run_tmux("select-window", "-t", target)
     _run_tmux("select-pane", "-t", target)
+    if session:
+        _run_tmux("switch-client", "-t", session)
 
 
 def kill_pane(pane_id: str) -> None:
