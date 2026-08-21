@@ -29,10 +29,11 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 from tmux_sentinel.status import (
-    WORKING, WAITING, STATUS_DIR,
+    IDLE, WORKING, WAITING, ERROR, STATUS_DIR,
     read_status, is_unseen, cleanup_stale, recreate_missing,
 )
 from tmux_sentinel.hook import _get_git_branch
@@ -161,6 +162,59 @@ def _display_name(pane: PaneInfo, agent_type: str) -> str:
     return pane.window_name
 
 
+@dataclass
+class _Record:
+    """A display row plus the fields the sort modes order on."""
+    row: list[str]
+    target: str
+    unseen: bool
+    severity: int
+    activity: int
+    session_index: int
+    window_index: int
+
+
+# Triage order for the unseen mode: what most wants a human, first. Waiting outranks
+# error because it's blocking on you right now, whereas an error has already happened.
+_SEVERITY = {WAITING: 0, ERROR: 1, WORKING: 2, IDLE: 3}
+_SEVERITY_NONE = 4          # a pane with no agent in it
+
+MODE_UNSEEN = "unseen"
+MODE_SESSION = "session"
+MODE_MRU = "mru"
+MODES = (MODE_UNSEEN, MODE_SESSION, MODE_MRU)
+
+# Shown in the fzf prompt. "recent" reads better than "mru" for the latter.
+_MODE_PROMPT = {MODE_UNSEEN: "unseen", MODE_SESSION: "session", MODE_MRU: "recent"}
+
+
+def _as_int(value: str) -> int:
+    """Parse a tmux index for sorting; window indices are numeric but arrive as text."""
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _sort_records(records: list[_Record], mode: str) -> list[_Record]:
+    """Order rows for the given mode.
+
+    Sorts are stable, so each key list only needs the fields that mode cares about —
+    ties keep the order panes were discovered in, which is session order.
+    """
+    if mode == MODE_MRU:
+        # Most-recently-used first. The focused pane sorts to the top (you're active
+        # in it now); the cursor parks on the row below it, so the first switchable
+        # target is preselected. See the cursor logic in main().
+        return sorted(records, key=lambda r: -r.activity)
+    if mode == MODE_SESSION:
+        # Reproduces the pre-modes ordering exactly: sessions in tmux's order, then
+        # window index within each.
+        return sorted(records, key=lambda r: (r.session_index, r.window_index))
+    # Default: triage. Unseen first, then by what most wants attention, then recency.
+    return sorted(records, key=lambda r: (not r.unseen, r.severity, -r.activity))
+
+
 def _build_rows(
     panes: list[PaneInfo],
     cur_session: str,
@@ -171,6 +225,7 @@ def _build_rows(
     daemon_state: dict = None,
     session_order: list[str] = None,
     focused_pane: str = "",
+    mode: str = MODE_UNSEEN,
 ) -> tuple[list[list[str]], list[str]]:
     """
     Build display rows and corresponding targets for the picker.
@@ -206,6 +261,7 @@ def _build_rows(
     home_symlinks = _home_symlink_targets(home)
     rows: list[list[str]] = []
     targets: list[str] = []
+    records: list[_Record] = []
 
     # Group panes by session
     sessions: dict[str, list[PaneInfo]] = {}
@@ -215,7 +271,7 @@ def _build_rows(
     # Use session order from tmux
     if session_order is None:
         session_order = list_sessions()
-    for session in session_order:
+    for session_index, session in enumerate(session_order):
         if session not in sessions:
             continue
 
@@ -264,6 +320,10 @@ def _build_rows(
                 cwd = status.cwd
                 branch = f"({status.git_branch})" if status.git_branch else ""
             else:
+                # No agent in this pane. display_status must be assigned here too, or
+                # it would leak from whichever pane the loop looked at last and give
+                # this row someone else's sort severity.
+                display_status = ""
                 icon_display = "[---]"
                 agent_icon = "  "
                 el = ""
@@ -288,21 +348,31 @@ def _build_rows(
                 marker = " "
             name = _display_name(p, at.get(p.pane_id, ""))
 
-            rows.append([
-                marker,
-                _truncate(p.session, _MAX_SESSION_LEN),
-                name,
-                agent_icon,
-                icon_display,
-                short_cwd,
-                branch,
-                el,
-            ])
-            # Target the pane, not "session:window": split panes share a window
-            # index, so a window-level target can't distinguish them and tmux
-            # would keep focus on whichever pane last had it.
-            targets.append(p.pane_id)
+            records.append(_Record(
+                row=[
+                    marker,
+                    _truncate(p.session, _MAX_SESSION_LEN),
+                    name,
+                    agent_icon,
+                    icon_display,
+                    short_cwd,
+                    branch,
+                    el,
+                ],
+                # Target the pane, not "session:window": split panes share a window
+                # index, so a window-level target can't distinguish them and tmux
+                # would keep focus on whichever pane last had it.
+                target=p.pane_id,
+                unseen=unseen,
+                severity=_SEVERITY.get(display_status, _SEVERITY_NONE),
+                activity=p.activity,
+                session_index=session_index,
+                window_index=_as_int(p.window_index),
+            ))
 
+    for rec in _sort_records(records, mode):
+        rows.append(rec.row)
+        targets.append(rec.target)
     return rows, targets
 
 
@@ -329,7 +399,7 @@ def _colorize_line(line: str) -> str:
     return line
 
 
-def _generate_list() -> str:
+def _generate_list(mode: str = MODE_UNSEEN) -> str:
     """Generate the fzf input list.
 
     Fast path: if the daemon is running, use its in-memory state snapshot for
@@ -340,11 +410,11 @@ def _generate_list() -> str:
 
     daemon_state = dump_state()
     if daemon_state is not None:
-        return _generate_list_from_daemon(daemon_state)
-    return _generate_list_direct()
+        return _generate_list_from_daemon(daemon_state, mode)
+    return _generate_list_direct(mode)
 
 
-def _generate_list_from_daemon(daemon_state: dict) -> str:
+def _generate_list_from_daemon(daemon_state: dict, mode: str = MODE_UNSEEN) -> str:
     """Build the list from the daemon's state snapshot (fast path)."""
     from concurrent.futures import ThreadPoolExecutor
     from tmux_sentinel.hook import _get_git_branch
@@ -383,12 +453,12 @@ def _generate_list_from_daemon(daemon_state: dict) -> str:
     rows, targets = _build_rows(
         panes, cur_sess, cur_win,
         agent_types=agent_types, git_branches=git_branches, daemon_state=daemon_state,
-        session_order=session_order, focused_pane=cur_pane,
+        session_order=session_order, focused_pane=cur_pane, mode=mode,
     )
     return _render(rows, targets)
 
 
-def _generate_list_direct() -> str:
+def _generate_list_direct(mode: str = MODE_UNSEEN) -> str:
     """Build the list via direct file + ps inspection (daemon-unavailable fallback)."""
     from concurrent.futures import ThreadPoolExecutor
     from tmux_sentinel.process import _get_process_tree
@@ -418,7 +488,7 @@ def _generate_list_direct() -> str:
 
     rows, targets = _build_rows(
         panes, cur_sess, cur_win, agent_types=agent_types,
-        git_branches=git_branches, focused_pane=cur_pane,
+        git_branches=git_branches, focused_pane=cur_pane, mode=mode,
     )
     return _render(rows, targets)
 
@@ -451,10 +521,62 @@ def _render(rows: list[list[str]], targets: list[str]) -> str:
     return "\n".join(f"{line}{sep}{target}" for line, target in zip(colorized, targets))
 
 
+def _cursor_row(fzf_input: str, mode: str) -> int:
+    """1-based row the cursor should rest on at launch, or 0 to leave it at the top.
+
+    Per mode, because the useful starting point differs:
+      session — the focused pane, answering "where am I" the instant it opens
+      unseen  — the first row needing attention, falling back to the focused pane
+      mru     — the top row, i.e. the most recent; but if that's the pane you're
+                already in, the one below it, since selecting your own pane is a no-op
+
+    Row indices map straight to fzf item positions because --no-sort and --reverse
+    keep the input order as the display order.
+    """
+    lines = fzf_input.splitlines()
+    current = 0
+    for i, line in enumerate(lines, start=1):
+        if "►" in line:
+            current = i
+            break
+
+    if mode == MODE_MRU:
+        # Deliberately keyed to row 1, not to wherever the focused pane happens to be.
+        # tmux's window_activity is last-*output* time, not last-focus time, so a
+        # chattier agent elsewhere can outrank the pane you're sitting in — the focused
+        # pane is often not the top row. Stepping past it wherever it appeared would
+        # land the cursor on an arbitrary row and skip the most recent target.
+        if current == 1 and len(lines) > 1:
+            return 2
+        return 1 if lines else 0
+    if mode == MODE_UNSEEN:
+        for i, line in enumerate(lines, start=1):
+            if "●" in line:
+                return i
+        return current
+    return current
+
+
+def _parse_mode(argv: list[str]) -> str:
+    """Read --mode=X from the arguments, falling back to the default.
+
+    An unrecognised mode falls back rather than erroring: the picker is bound to a
+    key, so a typo in a tmux.conf binding should still open a usable list.
+    """
+    for arg in argv:
+        if arg.startswith("--mode="):
+            value = arg.split("=", 1)[1]
+            if value in MODES:
+                return value
+    return MODE_UNSEEN
+
+
 def main() -> None:
+    mode = _parse_mode(sys.argv[1:])
+
     # --list mode: output the list and exit (used by fzf reload)
     if len(sys.argv) > 1 and sys.argv[1] == "--list":
-        sys.stdout.write(_generate_list())
+        sys.stdout.write(_generate_list(mode))
         return
 
     # --close mode: kill the selected pane (used by fzf ctrl-x). Targets are pane
@@ -471,19 +593,9 @@ def main() -> None:
         _toggle_preview_state()
         return
 
-    fzf_input = _generate_list()
+    fzf_input = _generate_list(mode)
     sep = "\x1f"
-
-    # Position the fzf cursor on the current window at launch, so "where am I"
-    # is answered the instant the popup opens (and it's the natural point to
-    # navigate away from). The current row is the only one carrying ►; its
-    # 1-based line index is the fzf item position. With --reverse + --no-sort
-    # the input order is the display order, so the index maps directly.
-    current_pos = 0
-    for i, line in enumerate(fzf_input.splitlines(), start=1):
-        if "►" in line:
-            current_pos = i
-            break
+    current_pos = _cursor_row(fzf_input, mode)
 
     # Build the reload and close commands for fzf.
     # -S skips Python's site-init (no pip deps here, so it's safe) — trims a
@@ -491,7 +603,7 @@ def main() -> None:
     # sitecustomize.py.
     script = f"PYTHONPATH={os.environ.get('PYTHONPATH', '.')} python3 -S {__file__}"
     close_cmd = f"{script} --close {{2}}"
-    reload_cmd = f"{script} --list"
+    reload_cmd = f"{script} --list --mode={mode}"
     toggle_preview_cmd = f"{script} --toggle-preview"
 
     # Field 2 is the target pane id, stored without the "%" tmux wants, so the
@@ -521,8 +633,11 @@ def main() -> None:
         "--ansi",
         "--no-sort",
         "--reverse",
-        "--prompt=Switch to > ",
-        "--header=ctrl-x: close pane  ?: toggle preview",
+        # The prompt names the active mode, since the ordering is otherwise hard to
+        # tell apart at a glance (unseen and mru coincide whenever nothing is unseen).
+        f"--prompt={_MODE_PROMPT[mode]} > ",
+        "--header=ctrl-x: close pane  ?: preview  "
+        "M-u/M-s/M-r: unseen/session/recent",
         "--no-info",
         "--no-multi",
         "--cycle",
@@ -543,6 +658,20 @@ def main() -> None:
         "--bind", f"ctrl-x:execute-silent({close_cmd})+reload({reload_cmd})",
         "--bind", f"?:toggle-preview+execute-silent({toggle_preview_cmd})",
     ]
+
+    # In-popup mode switching. Secondary to launching in the mode you want (the tmux
+    # keybinds), so the cursor just lands at the top of the new order rather than being
+    # recomputed — fzf can't run our per-mode cursor logic mid-session.
+    #
+    # M- rather than ctrl-, because ctrl-u and ctrl-r are fzf defaults (clear-query and
+    # toggle-sort); rebinding those would cost more than it gains.
+    for key, target_mode in (("alt-u", MODE_UNSEEN), ("alt-s", MODE_SESSION),
+                             ("alt-r", MODE_MRU)):
+        fzf_args += [
+            "--bind",
+            f"{key}:reload({script} --list --mode={target_mode})"
+            f"+change-prompt({_MODE_PROMPT[target_mode]} > )+first",
+        ]
     if _preview_visible():
         fzf_args += ["--bind", "start:show-preview"]
     # Place the cursor on the current window at startup. Bind to `load`, not

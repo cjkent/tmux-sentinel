@@ -472,6 +472,19 @@ def test_home_symlink_targets_ignores_broken_symlink():
     assert targets == {}
 
 
+def test_build_rows_no_agent_pane_gets_lowest_severity():
+    # display_status is only assigned in the agent branches, so without an explicit
+    # value the no-agent branch would inherit the previous pane's severity and sort
+    # as though it were waiting/working.
+    d = _setup()
+    write_status("99990", WAITING, "/tmp", "", 1000, status_dir=d)
+    panes = [_make_pane(pane_id="99990", window_index="0"),
+             _make_pane(pane_id="99991", window_index="1")]  # no status file
+    _, targets = _rows(d, panes)
+    # The waiting agent sorts above the plain pane, not level with it.
+    assert targets == ["99990", "99991"]
+
+
 if __name__ == "__main__":
     for name, func in sorted(globals().items()):
         if name.startswith("test_") and callable(func):
