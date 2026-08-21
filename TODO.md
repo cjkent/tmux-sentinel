@@ -2,15 +2,6 @@
 
 ## Planned changes (written up in detail elsewhere)
 
-- **Picker multi-mode redesign** → [PICKER-MODES-PLAN.md](PICKER-MODES-PLAN.md)
-  Drop session header rows, make the session name a column on every row, and sort
-  the flat list by one of three modes: `unseen` (default triage view), `session`
-  (today's grouped order), `mru` (most-recently-used first). Primary interaction is
-  three per-mode tmux launch keybinds; in-popup switching is a nice-to-have. Also
-  widens the popup and adds a per-mode cursor resting position. Fully specced and
-  settled — no open questions. Groundwork already landed in `ef89d1d` (pane-precise
-  targets, single `►` marker), which the plan notes so it isn't re-derived.
-
 - **Staleness guard for stranded "working" state** → [STALE-WORKING-GUARD-PLAN.md](STALE-WORKING-GUARD-PLAN.md)
   Backstop for panes stranded on `working` when a turn ends without a `Stop` hook
   (interrupt into a footer no manifest rule covers). **Includes a warning worth
@@ -31,6 +22,32 @@
 
 ## Ideas
 
+- **Package as a tmux plugin (TPM)** — Roughly a day. The blocker isn't packaging, it's that `setup.sh` is interactive (10 `read` prompts plus an fzf multi-select) and edits other tools' config files, neither of which TPM can do: it runs a root-level `*.tmux` file non-interactively on every tmux start.
+
+  What it needs:
+  - **Split setup in two.** A non-interactive, idempotent `sentinel.tmux` for bindings, options, hooks and the status bar; `setup.sh` keeps the part that must stay opt-in — injecting hooks into `~/.kiro/agents/*.json` and `~/.claude/settings.json`. A plugin silently rewriting another tool's config on every tmux start isn't acceptable.
+  - **Config via tmux options** (`@sentinel-*`, read with `show-option -gqv`), which is the TPM convention. This one change *simplifies* things: the plugin file re-runs on reload, so it can rebuild the bindings from options — which finally makes popup geometry an ordinary setting and retires `bin/set-popup-size.sh`. Keep `config.toml` for the Python-side display caps, which are read per-invocation and shouldn't pay a `show-option` subprocess each.
+  - **Stop clobbering `status-right`** (`setup.sh:302` overwrites it wholesale). Convention is a placeholder the user positions themselves, e.g. `set -g status-right '#{sentinel_status} %H:%M'`, substituted into the existing value. Already tracked in [PORTABILITY.md](PORTABILITY.md); being a plugin forces it.
+  - **Hook ordering.** TPM load order isn't controllable, and an unindexed `set-hook` resets the whole array for that event — this already bit us: tmux-switch loading later wiped our LRU hooks. Set at a non-zero index *and* re-assert, or install from a `client-attached` hook that fires after all plugins load.
+  - **Dependency check that fails loudly.** Python 3.11+, fzf 0.30+, tmux 3.2+. There's no stdout at tmux start, so `display-message` a one-line warning rather than breaking silently.
+
+  **Worth deciding first whether it's worth it.** TPM buys `prefix+I` install and auto-update, but hook injection still needs a manual `./setup.sh`, so it's a two-step install either way. If the goal is just "easier to try", a better README or a one-line installer gets most of the value for an hour rather than a day.
+
+- **What a plugin-only install gives you (no `setup.sh`)** — Verified: agent detection is entirely hookless. The `ps` tree walk finds every agent and the screen-scrape classifies them, so the picker is fully functional on its own.
+
+  Working: the picker (all panes and sessions, agent icons, `IDL`/`WRK`/`WAI`, cwd, branch, pane-precise switching, preview, `ctrl-x`), all three sort modes including `mru` (its hooks are tmux-side), the status-bar summary, stale cleanup, the daemon, `config.toml`.
+
+  Lost or degraded, all of it downstream of the hooks:
+  - **Bell on turn end** — only `hook.py` emits `\a`; nothing else can know a turn ended.
+  - **`[ERR]` status** — needs `postToolUse`'s failure flag; no other source exists.
+  - **Elapsed time** — hooks timestamp the *prompt*, the poll stamps *discovery*, so `WRK` elapsed counts from when the daemon noticed rather than when you asked.
+  - **`unseen` reliability** — the poll only infers it from a `WORKING`→`IDLE` transition it happens to observe, so a turn that starts and finishes between polls is missed: the red dot and the status-bar count under-report.
+  - **Latency** — 5-10s poll granularity instead of immediate.
+  - **Agent cwd** — falls back to the shell's `pane_current_path` (the shallow-path issue above).
+  - **`WAI` from a trailing `?`** — Kiro-only, and the response text comes from the hook.
+
+  So *switching* works fully; *notification* doesn't. Which means `sentinel.tmux` should `display-message` a one-line nudge on first run ("run ./setup.sh to enable notifications") rather than leaving people to conclude the unseen dot is broken.
+
 - **Native OS notifications** — Fire a macOS notification (via `osascript`) when an agent hits a permission prompt or finishes, but only when the terminal doesn't have OS focus (so you're not pinged while already looking at it). Requires `focus-events on` in tmux or an `osascript` frontmost-app check.
 
 - **Move picker row-building into the daemon** — After `-S` and the tmux/git optimizations, the popup's remaining ~110ms is mostly Python interpreter startup + imports (~70ms) rather than computation (~5ms Python work once the process is up). Moving row-building/formatting into the daemon (a new `render <pane_id>` command returning the finished fzf input) would let the popup-side script shrink to a thin connect-and-pipe client — but *something* still has to start a process to run fzf and pipe the daemon's response into it. To truly avoid paying interpreter startup, that thin client would need to be shell (`nc` + `fzf`, same pattern as `bin/status_client.sh`) rather than Python.
@@ -47,6 +64,14 @@
 - **Colour unseen/current window names in the picker** — Colour the unseen rows' window name bold red and the current row's green, so they're findable at a glance when many windows are listed (the leading markers are small). The wrinkle that stalled this: injecting ANSI codes into the name *before* `align_columns` inflates the measured column width (`_display_width` counts every char), breaking alignment — so the colouring has to happen after alignment, in `_colorize_line`, which only sees the joined line. Worth folding into the picker-modes work, since that rewrites the same row/render path.
 
 ## Done
+
+- **Picker multi-mode redesign** (`ca1d799`, `cc83671`, `74408a7`, `c8023b5`, `09fe491`) — Delivered [PICKER-MODES-PLAN.md](PICKER-MODES-PLAN.md) in full: session headers dropped for a session column, and three sort modes (`unseen` default, `session`, `mru`) with per-mode cursor placement, `--mode=X` launch keys and in-popup Alt-u/s/r switching.
+
+  Two places the plan was wrong, both found by testing:
+  - It assumed the focused pane sorts to the top in `mru`, so the cursor should start on row 2. `window_activity` is last-*output* time, so a chattier agent routinely outranks the pane you're in; the cursor is keyed to row 1 instead, stepping down only when row 1 *is* the focused pane.
+  - `window_activity` turned out to be the wrong signal for `mru` altogether — it promoted windows that had never been visited. Visits are now recorded to `~/.tmux-sentinel/lru` by tmux hooks (`bin/lru_bump.sh`), with output time only as a fallback for never-visited panes.
+
+  Also fixed en route: `switch_to_pane` ran `switch-client` before `select-window`, so the intermediate window counted as a visit and one switch recorded two.
 
 - **User config file** (`config.toml`) — Settings now live in `~/.tmux-sentinel/config.toml`, parsed with stdlib `tomllib` (project baseline moved to Python 3.11+). Covers the picker's column caps, `cwd_head_segments`, and the preview's width and length, plus the daemon's poll intervals. Missing/partial/malformed files fall back to defaults. `tomllib` is imported lazily only when a config file exists, since importing it unconditionally cost ~11ms on every picker launch. Popup geometry deliberately stays in the tmux binding — tmux fixes a popup's size before Python starts — and `bin/set-popup-size.sh` edits it, persisting to `~/.tmux.conf` and re-binding the live server.
 
