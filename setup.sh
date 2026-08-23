@@ -286,138 +286,101 @@ else
     fi
 fi
 
-# Configure tmux options for agent monitoring.
-# These are runtime settings — they don't persist across tmux restarts.
-# To make them permanent, add them to ~/.tmux.conf.
-step "Configuring tmux..."
-# Bell monitoring: when an agent finishes, it rings the bell (\a).
-# monitor-bell + bell-action other = highlight the window tab for bells in OTHER windows.
-# window-status-bell-style = how the highlighted tab looks (red + bold).
-tmux set -g monitor-bell on 2>/dev/null && info "monitor-bell on" || warn "Could not set monitor-bell"
-tmux set -g bell-action other 2>/dev/null && info "bell-action other" || warn "Could not set bell-action"
-tmux set -g window-status-bell-style 'fg=red,bold' 2>/dev/null && info "window-status-bell-style set" || warn "Could not set bell style"
-tmux set -g status-interval 5 2>/dev/null && info "status-interval 5s" || warn "Could not set status-interval"
-# status-right: run the status bar script every status-interval seconds.
-# The #() syntax tells tmux to execute the command and insert its output.
-tmux set -g status-right "#($REPO_DIR/bin/status_client.sh '#{pane_id}') %H:%M" 2>/dev/null && info "status-right configured" || warn "Could not set status-right"
-
-# Visit tracking for the picker's "recent" sort mode.
+# --- tmux configuration ---
 #
-# tmux has no last-*visited* timestamp — #{window_activity} is last-*output* time, so an
-# agent printing into a window you never looked at would jump to the top of a recency
-# list. These hooks record what you actually visit.
+# Not done here any more. sentinel.tmux owns everything tmux-side — bindings, options,
+# hooks, the status bar — because it has to be re-runnable on every tmux start for the
+# plugin case, and duplicating that logic in two places would guarantee they drift.
 #
-# Index [10] rather than the default [0]: other tools set these same hooks (tmux-switch
-# does), and an unindexed set-hook would silently replace theirs.
-#
-# The nested `tmux display -p` is required, not redundant: tmux expands format strings
-# in a hook command against the first attached session rather than the event's target,
-# so #{pane_id} inline would report the wrong pane for most navigation.
-LRU_HOOK="run-shell -b \"$REPO_DIR/bin/lru_bump.sh \\\"\$(tmux display -p '#{pane_id}')\\\"\""
-for hook in after-select-window after-select-pane client-session-changed; do
-    tmux set-hook -g "${hook}[10]" "$LRU_HOOK" 2>/dev/null || true
-done
-info "visit tracking hooks installed (for the picker's recent mode)"
-
-# Picker keybind — interactive: accept the default, or pick a custom one.
-# Custom keys are entered in tmux's own notation (e.g. "a", "M-Space", "C-x")
-# rather than captured as raw keystrokes, since that's fragile across
-# terminals/encodings and tmux already validates its own notation for us.
-PICKER_CMD=(display-popup -w 85% -h 70% -E "PYTHONPATH=$REPO_DIR python3 -S $REPO_DIR/tmux_sentinel/picker.py --mode=unseen")
-# Reused when printing example binds for the other two modes.
-PICKER_BIND_BODY="display-popup -w 85% -h 70% -E \"PYTHONPATH=$REPO_DIR python3 -S $REPO_DIR/tmux_sentinel/picker.py"
-DEFAULT_KEY="M-Space"
-DEFAULT_PREFIXED=0
-
-echo -e "  Default keybind: ${BOLD}Alt/Meta + Space${NC} (standalone — no tmux prefix needed)"
-echo -n "  Use the default? [Y/n] "
-read -r answer
-
-KEY="" PREFIXED=""
-if [[ "${answer:-Y}" =~ ^[Nn]$ ]]; then
-    while true; do
-        echo "  Enter a tmux key (tmux.conf notation — see 'man tmux' KEY BINDINGS, e.g. a, M-Space, C-x):"
-        read -r -p "  Key: " KEY
-        [ -n "$KEY" ] || { warn "Key cannot be empty"; continue; }
-
-        echo -n "  Require your tmux prefix key first (vs. standalone)? [y/N] "
-        read -r pfx
-        if [[ "${pfx:-N}" =~ ^[Yy]$ ]]; then PREFIXED=1; else PREFIXED=0; fi
-
-        TABLE="prefix"; [ "$PREFIXED" -eq 0 ] && TABLE="root"
-        EXISTING=$(tmux list-keys -T "$TABLE" "$KEY" 2>/dev/null)
-        if [ -n "$EXISTING" ] && ! grep -q "tmux_sentinel" <<< "$EXISTING"; then
-            warn "'$KEY' in the $TABLE table is already bound to:"
-            echo "    $EXISTING"
-            echo -n "  Overwrite it? [y/N] "
-            read -r ow
-            [[ "${ow:-N}" =~ ^[Yy]$ ]] || continue
-        fi
-        break
-    done
-else
-    KEY="$DEFAULT_KEY"
-    PREFIXED="$DEFAULT_PREFIXED"
-fi
-
-if [ "$PREFIXED" -eq 1 ]; then
-    tmux bind-key "$KEY" "${PICKER_CMD[@]}" 2>/dev/null \
-        && info "prefix + $KEY bound to agent picker" \
-        || error "tmux rejected key '$KEY' — leaving picker unbound"
-else
-    tmux bind-key -n "$KEY" "${PICKER_CMD[@]}" 2>/dev/null \
-        && info "$KEY (standalone) bound to agent picker" \
-        || error "tmux rejected key '$KEY' — leaving picker unbound"
-fi
+# What's left for this script is the part a plugin must not do: writing hooks into other
+# tools' config files, which is why it stays an explicit opt-in step.
+step "Wiring up tmux..."
 
 TMUX_CONF="$HOME/.tmux.conf"
+PLUGIN_LINE="run-shell $REPO_DIR/sentinel.tmux"
+MARKER="# tmux-sentinel"
 
-echo -n "  Make this persist across tmux restarts (write to $TMUX_CONF)? [Y/n] "
-read -r persist
-if [[ "${persist:-Y}" =~ ^[Yy]$ ]]; then
-    MARKER="# tmux-sentinel: agent picker keybind"
-    if [ "$PREFIXED" -eq 1 ]; then
-        BIND_LINE="bind-key $KEY display-popup -w 85% -h 70% -E \"PYTHONPATH=$REPO_DIR python3 -S $REPO_DIR/tmux_sentinel/picker.py --mode=unseen\""
-    else
-        BIND_LINE="bind -n $KEY display-popup -w 85% -h 70% -E \"PYTHONPATH=$REPO_DIR python3 -S $REPO_DIR/tmux_sentinel/picker.py --mode=unseen\""
-    fi
-
-    if [ -f "$TMUX_CONF" ] && grep -qF "$MARKER" "$TMUX_CONF"; then
-        awk -v marker="$MARKER" -v newline="$BIND_LINE" '
-            $0 == marker { print; getline; print newline; next }
-            { print }
-        ' "$TMUX_CONF" > "$TMUX_CONF.tmp" && mv "$TMUX_CONF.tmp" "$TMUX_CONF"
-    else
-        { echo ""; echo "$MARKER"; echo "$BIND_LINE"; } >> "$TMUX_CONF"
-    fi
-    info "Keybind persisted to $TMUX_CONF"
+if grep -qF "@plugin 'cjkent/tmux-sentinel'" "$TMUX_CONF" 2>/dev/null \
+   || grep -qF '@plugin "cjkent/tmux-sentinel"' "$TMUX_CONF" 2>/dev/null; then
+    info "TPM plugin entry found — tmux config is handled by sentinel.tmux"
+elif grep -qF "sentinel.tmux" "$TMUX_CONF" 2>/dev/null; then
+    info "sentinel.tmux already sourced from $TMUX_CONF"
 else
-    warn "Keybind is only active for this tmux server — it won't survive a tmux restart"
+    echo "  tmux-sentinel's tmux config (keybinds, status bar, hooks) lives in"
+    echo "  sentinel.tmux. Add it to $TMUX_CONF so it loads on every tmux start?"
+    echo -n "  Add it? [Y/n] "
+    read -r answer
+    if [ "${answer:-Y}" != "n" ] && [ "${answer:-Y}" != "N" ]; then
+        # Appended last so it runs after any plugin manager: an unindexed set-hook in
+        # another plugin resets the whole hook array for that event, and whoever runs
+        # last wins.
+        {
+            echo ""
+            echo "$MARKER: loads keybinds, status bar and visit-tracking hooks."
+            echo "# Keep this after any plugin manager (e.g. TPM's run script) — see"
+            echo "# the hook-ordering note in the project README."
+            echo "$PLUGIN_LINE"
+        } >> "$TMUX_CONF"
+        info "Added to $TMUX_CONF"
+    else
+        warn "Skipped — run 'tmux run-shell $REPO_DIR/sentinel.tmux' to load it manually"
+    fi
 fi
+
+# Load it now so this session is configured without needing a restart.
+tmux run-shell "$REPO_DIR/sentinel.tmux" 2>/dev/null \
+    && info "Loaded into the running tmux server" \
+    || warn "Could not load into the running server (is tmux running?)"
+
+# status-right: offered, never imposed. sentinel.tmux only ever *substitutes* a
+# #{sentinel_status} placeholder, so without one the status bar shows nothing — which
+# looks like a broken install. Rather than overwrite whatever the user has built (the
+# old behaviour), offer to append the placeholder and let them move it later.
+# Only used to detect an existing segment; the value itself is never copied.
+CURRENT_SR="$(tmux show-option -gqv status-right 2>/dev/null || true)"
+case "$CURRENT_SR" in
+    *sentinel_status*|*status_client.sh*)
+        info "status-right already shows the agent summary"
+        ;;
+    *)
+        echo "  The status bar can show a summary of agents needing attention."
+        echo "  This appends #{sentinel_status} to your status-right; you can move it later."
+        echo -n "  Add it? [Y/n] "
+        read -r answer
+        if [ "${answer:-Y}" != "n" ] && [ "${answer:-Y}" != "N" ]; then
+            # `set -ga` appends to whatever status-right holds at that point, rather
+            # than snapshotting today's value into the conf — a snapshot would go stale
+            # the moment the user edited their own status-right line.
+            {
+                echo ""
+                echo "$MARKER: agent summary. Move #{sentinel_status} wherever you like;"
+                echo "# sentinel.tmux substitutes it for the real command on load."
+                echo "set -ga status-right ' #{sentinel_status}'"
+            } >> "$TMUX_CONF"
+            tmux set -ga status-right " #($REPO_DIR/bin/status_client.sh '#{pane_id}')" 2>/dev/null || true
+            info "Added to $TMUX_CONF and applied to this session"
+        else
+            warn "Skipped — add #{sentinel_status} to your status-right when you want it"
+        fi
+        ;;
+esac
 
 step "Setup complete!"
 echo ""
-# Report the key actually chosen above, not a hardcoded one.
-if [ "$PREFIXED" -eq 1 ]; then
-    echo -e "  Picker:     ${BOLD}prefix + $KEY${NC}"
-else
-    echo -e "  Picker:     ${BOLD}$KEY${NC} (standalone)"
-fi
-echo -e "  Status bar: agent summary on the right"
-echo -e "  Bell:       window tab highlights red on done/waiting/error"
-echo -e "  In picker:  ${BOLD}?${NC} toggles a preview of the highlighted pane"
+echo -e "  Agent hooks: installed (status tracking, bell, unseen flags)"
+echo -e "  tmux config: ${BOLD}sentinel.tmux${NC}"
 echo ""
-echo -e "  Settings:    ${BOLD}bin/edit-config.sh${NC}      (opens ~/.tmux-sentinel/config.toml in \$EDITOR)"
-echo -e "  Popup size:  ${BOLD}bin/set-popup-size.sh${NC}   (edits the tmux binding; not a config setting)"
+echo -e "  Picker keys (defaults, all without the tmux prefix):"
+echo -e "    ${BOLD}C-Space${NC}  unseen  — triage: what needs you, first"
+echo -e "    ${BOLD}M-Space${NC}  session — grouped by session"
+echo -e "    ${BOLD}C-Tab${NC}    recent  — most recently visited"
+echo -e "  In the picker: ${BOLD}?${NC} preview · ${BOLD}ctrl-x${NC} close pane · ${BOLD}Alt-u/s/r${NC} switch mode"
 echo ""
-echo -e "  The picker has three sort modes. The keybind above opens ${BOLD}unseen${NC} (triage);"
-echo -e "  ${BOLD}Alt-u${NC}/${BOLD}Alt-s${NC}/${BOLD}Alt-r${NC} switch mode inside the popup. To open a mode directly,"
-echo -e "  add extra binds to ${BOLD}$TMUX_CONF${NC} — e.g.:"
-echo "    bind -n M-Space $PICKER_BIND_BODY --mode=session\""
-echo "    bind -n C-Tab   $PICKER_BIND_BODY --mode=mru\""
+echo -e "  Change keys, popup size and more with ${BOLD}@sentinel-*${NC} options in $TMUX_CONF:"
+echo "    set -g @sentinel-key-unseen  'C-Space'   # or 'none' to disable"
+echo "    set -g @sentinel-popup-width '85%'"
+echo -e "  Full list: see the Configuration section of the README."
 echo ""
-echo -e "  Optional keybinds for the settings tools:"
-echo "    bind -n M-, display-popup -w 80% -h 80% -E \"$REPO_DIR/bin/edit-config.sh\""
-echo "    bind -n M-. display-popup -w 60% -h 30% -E \"TMUX_SENTINEL_IN_POPUP=1 $REPO_DIR/bin/set-popup-size.sh\""
+echo -e "  Display settings (column widths, preview): ${BOLD}bin/edit-config.sh${NC}"
 echo ""
 echo -e "  To remove hooks: ${BOLD}$(basename "$0") --remove-hooks${NC}"
