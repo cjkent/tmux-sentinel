@@ -107,23 +107,24 @@ the active mode:
 | `session` | session order, then window index — the original grouped order | the focused pane |
 | `mru` | most recently *visited* first | top row, or the one below it if that's the pane you're in |
 
-Launch a mode with `--mode=unseen|session|mru`; `unseen` is the default. Bind one key
-per mode, e.g.:
-
-```tmux
-bind -n C-Space display-popup -w 85% -h 70% -E "PYTHONPATH=/path/to/tmux-sentinel python3 -S /path/to/tmux-sentinel/tmux_sentinel/picker.py --mode=unseen"
-bind -n M-Space display-popup -w 85% -h 70% -E "… --mode=session"
-bind -n C-Tab   display-popup -w 85% -h 70% -E "… --mode=mru"
-```
+Each mode has its own key, set with `@sentinel-key-unseen`, `@sentinel-key-session` and
+`@sentinel-key-mru` (see [tmux options](#tmux-options)). `unseen` is the default when the
+picker is launched without `--mode`.
 
 `mru` orders by when you last *visited* a pane. tmux has no last-visited timestamp —
 `#{window_activity}` is last-*output* time, so an agent printing into a window you never
-looked at would jump to the top. Setup therefore installs three tmux hooks
+looked at would jump to the top. `sentinel.tmux` therefore installs three tmux hooks
 (`after-select-window`, `after-select-pane`, `client-session-changed`) that record each
-visit to `~/.tmux-sentinel/lru`, most recent first.
+visit to `~/.tmux-sentinel/lru`, most recent first. Set `@sentinel-track-visits off` to
+skip them.
 
-Those hooks are registered at index `[10]` rather than the default `[0]`, so they sit
-alongside any hooks other tools have set on the same events instead of replacing them.
+Hooks are array options, and the index matters. An unindexed `set-hook` resets the whole
+array for that event, silently deleting hooks another tool set — so we never use one.
+Instead we reuse the slot already holding our command if there is one, and otherwise take
+the first free index. That's idempotent across reloads, and it leaves other tools' hooks
+alone (tmux-switch, for instance, sets two of these three). What no index can survive is
+another tool's *unindexed* set on the same event, which is why the load-order note in
+[Setup](#1-install-the-plugin) matters.
 
 Panes with no recorded visit sort last, ordered among themselves by output time — so a
 fresh install still gives a sensible list before any history accumulates.
@@ -177,34 +178,99 @@ bind -n M-, display-popup -w 80% -h 80% -E "/path/to/tmux-sentinel/bin/edit-conf
 
 ## Setup
 
-Prerequisites: Python 3.11+, fzf 0.30+, tmux 3.2+. (`nc` optional — see below.) Setup checks all three versions, since these features fail at keypress rather than at install if they're too old.
+Prerequisites: Python 3.11+, fzf 0.30+, tmux 3.2+. (`nc` optional — see Dependencies.)
+Both the plugin and `setup.sh` check these, since they otherwise fail at keypress with
+cryptic errors rather than at install.
+
+Setup is two steps, and they do different jobs:
+
+| | What it does | Why separate |
+|---|---|---|
+| `sentinel.tmux` | keybinds, status bar, visit-tracking hooks | must be re-runnable on every tmux start |
+| `./setup.sh` | agent lifecycle hooks, in *your agents'* config files | writes to other tools' configs, so it stays an explicit opt-in |
+
+### 1. Install the plugin
+
+With [TPM](https://github.com/tmux-plugins/tpm) or [tpack](https://github.com/joshmedeski/tpack) (a drop-in TPM replacement with a TUI) — the declaration is identical:
+
+```tmux
+set -g @plugin 'cjkent/tmux-sentinel'
+```
+
+Then `prefix + I` to install.
+
+Without a plugin manager, clone it and source the entry point from `~/.tmux.conf`:
+
+```tmux
+run-shell /path/to/tmux-sentinel/sentinel.tmux
+```
+
+**Put it after your plugin manager's init line.** tmux hooks are array options, and an
+unindexed `set-hook` resets the whole array for that event — so if another plugin loads
+after us and sets one of the hooks we use, ours is silently deleted. Loading last avoids
+that. (See the note under Sort modes about which hooks are involved.)
+
+### 2. Install the agent hooks
 
 ```bash
 ./setup.sh
 ```
 
-Kiro and Claude Code are both optional: setup skips whichever you don't have.
+Kiro and Claude Code are both optional — setup skips whichever you don't have. It:
 
-The setup script:
+1. Checks dependencies and creates `~/.tmux-sentinel/status/`
+2. Offers an fzf multi-select of your Kiro agent configs (`~/.kiro/agents/*.json`), everything pre-selected — Enter accepts all, Tab deselects, Esc skips
+3. Backs up the selected configs and injects hooks for all 5 lifecycle events, replacing the old bash hook if an earlier version installed it
+4. Offers to do the same for Claude Code (`~/.claude/settings.json`), creating the file if absent and leaving hooks of your own untouched
+5. Offers to add the `sentinel.tmux` line to `~/.tmux.conf`, and to add the status-bar placeholder
 
-1. Checks that dependencies are installed
-2. Creates `~/.tmux-sentinel/status/`
-3. Presents an fzf multi-select of your Kiro agent configs (`~/.kiro/agents/*.json`), everything pre-selected — Enter accepts all, Tab deselects, Esc skips
-4. Backs up the selected configs and injects hook entries for all 5 lifecycle events
-5. Replaces the old bash hook (`notify.sh`) if an earlier version installed it
-6. Offers to inject hooks into Claude Code settings (`~/.claude/settings.json`), creating the file if absent and leaving any hooks of your own untouched
-7. Configures tmux: bell monitoring, status bar, and one picker keybinding opening `unseen` mode (default `Alt+Space`, standalone — no tmux prefix needed; you can accept the default or choose your own during setup). It then prints example binds for the other two modes
-
-To remove hooks from agent configs:
+To remove the agent hooks again:
 
 ```bash
 ./setup.sh --remove-hooks
 ```
 
-Setup offers to write the picker keybinding to `~/.tmux.conf` so it survives a tmux
-restart. The other tmux options it sets (bell monitoring, `status-right`, poll
-interval) are runtime-only — add them to `~/.tmux.conf` yourself if you want them
-permanent.
+**Without step 2 the picker still works** — agent detection doesn't need the hooks, since
+the process tree walk finds agents and the screen-scrape classifies them. What you lose
+is notification: no bell when a turn ends, no `[ERR]` status, unreliable unseen dots, and
+elapsed time measured from when the daemon noticed rather than when you asked.
+
+### tmux options
+
+All optional; defaults shown. Set them before the `sentinel.tmux` line.
+
+```tmux
+set -g @sentinel-key-unseen    'C-Space'   # triage view; 'none' to disable
+set -g @sentinel-key-session   'M-Space'   # grouped by session
+set -g @sentinel-key-mru       'C-Tab'     # most recently visited
+set -g @sentinel-key-table     'root'      # 'root' = no prefix, 'prefix' = prefix first
+set -g @sentinel-popup-width   '85%'
+set -g @sentinel-popup-height  '70%'
+set -g @sentinel-track-visits  'on'        # 'off' disables the visit-tracking hooks
+set -g @sentinel-set-bell-options 'on'     # 'off' leaves your bell settings alone
+set -g @sentinel-bell-style    'fg=red,bold'
+set -g @sentinel-status-interval '5'
+```
+
+Use `none` rather than an empty string to disable a key: tmux reports an option set to
+`''` identically to one that was never set, so an empty value just falls back to the
+default.
+
+Display settings — column widths, preview size — live in `~/.tmux-sentinel/config.toml`
+instead, because the picker reads them per-invocation and shouldn't pay a `show-option`
+subprocess for each. See [Configuration](#configuration).
+
+### Status bar
+
+The plugin never overwrites `status-right`. Put a placeholder where you want the
+segment and it's substituted on load:
+
+```tmux
+set -g status-right '#{sentinel_status} %H:%M'
+```
+
+With no placeholder, nothing is touched and no summary appears. `setup.sh` offers to
+append one for you.
 
 ## File Structure
 
@@ -230,7 +296,8 @@ tmux-sentinel/
 ├── manifests/                 # Screen-scrape patterns, one file per agent
 │   ├── claude.toml
 │   └── kiro.toml
-├── setup.sh                   # Interactive installer (bash)
+├── sentinel.tmux              # Plugin entry point (TPM/tpack); tmux-side config
+├── setup.sh                   # Agent-hook installer (interactive)
 ├── config.toml.example        # Annotated default settings
 ├── bin/
 │   ├── status_client.sh       # status-right client (lazy-starts the daemon)
