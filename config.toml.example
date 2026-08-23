@@ -7,9 +7,10 @@
 # The picker reads this on every open, so changes take effect immediately.
 # Changing the poll intervals needs a daemon restart to take effect.
 #
-# NOT here: the popup's width and height. tmux fixes a popup's size before the
-# picker starts, so that lives in the tmux binding instead — run
-# bin/set-popup-size.sh to change it.
+# NOT here: the popup's width and height. tmux fixes a popup's size before the picker
+# starts, so it can't be read from this file — it's a tmux option instead:
+#     set -g @sentinel-popup-width  '85%'
+#     set -g @sentinel-popup-height '70%'
 
 # --- Picker columns -------------------------------------------------------
 # Caps on the three free-text columns, in characters. Columns are padded to the

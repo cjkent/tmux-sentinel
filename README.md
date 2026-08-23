@@ -160,22 +160,20 @@ Optional. Every setting has a default, so a partial file is fine and a missing o
 
 Opens `~/.tmux-sentinel/config.toml` in `$EDITOR`, creating it from the annotated example on first use, and reports any TOML syntax error on exit (an unparseable file is silently ignored in favour of defaults, so it's worth knowing).
 
-The popup's **width and height are not in this file.** tmux fixes a popup's size when it opens the popup, before the picker process exists, so the geometry has to live in the tmux binding. To change it:
+The popup's **width and height are not in this file.** tmux fixes a popup's size when it opens the popup, before the picker process exists, so the geometry can't be read from inside Python. It's a tmux option instead, applied by `sentinel.tmux` when it builds the bindings:
 
-```bash
-./bin/set-popup-size.sh
+```tmux
+set -g @sentinel-popup-width  '85%'
+set -g @sentinel-popup-height '70%'
 ```
 
-It prompts for width and height (defaulting to your current values), updates the binding in `~/.tmux.conf` so it persists, and re-binds the running tmux server. Only lines binding the picker are touched, so other tools' popups are left alone.
+Change it, reload your config, and the next popup is the new size.
 
-Both scripts can be bound to keys so they open in a popup themselves:
+The config editor can be bound to a key so it opens in a popup itself:
 
 ```tmux
 bind -n M-, display-popup -w 80% -h 80% -E "/path/to/tmux-sentinel/bin/edit-config.sh"
-bind -n M-. display-popup -w 60% -h 30% -E "TMUX_SENTINEL_IN_POPUP=1 /path/to/tmux-sentinel/bin/set-popup-size.sh"
 ```
-
-`TMUX_SENTINEL_IN_POPUP=1` makes the resize script wait for a keypress before closing, so you can read the confirmation. Note a resize can't affect the popup it was requested from — tmux fixes a popup's geometry when it opens — so the new size shows up the next time you open the picker.
 
 ## Setup
 
@@ -237,7 +235,6 @@ tmux-sentinel/
 ├── bin/
 │   ├── status_client.sh       # status-right client (lazy-starts the daemon)
 │   ├── edit-config.sh         # Opens config.toml in $EDITOR
-│   └── set-popup-size.sh      # Changes the popup geometry in the tmux binding
 └── tests/
     ├── test_*.py              # Python tests (186)
     └── test-*.sh              # Bash tests (picker + setup)

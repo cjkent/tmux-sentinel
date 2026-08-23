@@ -93,13 +93,13 @@ assertions. Verified: **these are not a portability problem** — `_shorten_path
 contributor. `tests/test_picker.py:113` does use the real `os.path.expanduser("~")`,
 which is environment-coupled but correct anywhere.
 
-### Assumes the user wants their tmux config edited
+### ~~Assumes the user wants their tmux config edited~~ — fixed
 
-`setup.sh` and `bin/set-popup-size.sh` both write to `~/.tmux.conf`, and setup
-overwrites `status-right` wholesale rather than composing with an existing value.
-Verified by reading. Setup does ask before persisting the keybind, but a user with a
-carefully-built status bar would lose it. Worth preserving any existing `status-right`
-content, or at least warning.
+`setup.sh` used to overwrite `status-right` wholesale, destroying whatever the user had
+built. Fixed when the tmux configuration moved into `sentinel.tmux`: the plugin only
+ever *substitutes* a `#{sentinel_status}` placeholder, and does nothing at all if the
+user hasn't added one. `setup.sh` offers to append the placeholder with `set -ga`, which
+composes with the existing value rather than replacing it, and asks first.
 
 ## Checked and OK
 
@@ -109,7 +109,7 @@ content, or at least warning.
   tracked `.py`/`.sh`/`.toml`.
 - **No macOS-only tools.** No `osascript`, `pbcopy`, `gsed`, `stat -f`, `date -r`.
 - **No `sed -i`** anywhere, which is the classic BSD-vs-GNU trap (`sed -i ''` on macOS
-  vs `sed -i` on GNU). `bin/set-popup-size.sh` uses a temp file and `mv` instead.
+  vs `sed -i` on GNU).
 - **No bash 4+ constructs.** No `mapfile`/`readarray`, associative arrays, or `${v^^}`.
   All shell scripts parse under macOS's `/bin/bash` 3.2, which was verified explicitly
   — `mapfile` had in fact been used and was removed for this reason.

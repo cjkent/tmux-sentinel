@@ -6,7 +6,7 @@
 #
 # Picker settings are read on every open, so edits apply immediately. Daemon poll
 # intervals need a daemon restart. Popup geometry is not in this file at all — tmux
-# fixes a popup's size before the picker starts — so use bin/set-popup-size.sh.
+# fixes a popup's size before the picker starts — set @sentinel-popup-width/-height.
 #
 # Bind it with (note the popup needs -E so the editor gets a terminal):
 #   bind -n M-, display-popup -w 80% -h 80% -E "/path/to/tmux-sentinel/bin/edit-config.sh"
