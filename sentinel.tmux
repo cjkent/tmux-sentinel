@@ -31,6 +31,52 @@ opt() {
 # lands in their message area, not a log.
 warn() { tmux display-message "tmux-sentinel: $1" 2>/dev/null || true; }
 
+# Install a hook at our own array slot: reuse the index already holding our command
+# (idempotent across reloads), else take the first free one (collision-free, and never
+# disturbs another tool's).
+#
+# tmux hooks are array options and the three ways to set one all misbehave differently:
+#   * unindexed  — resets the whole array, silently deleting other tools' hooks
+#   * -a append  — never idempotent: one copy per reload, and the hook then runs once
+#                  per copy on every event
+#   * indexed    — safe, but a hardcoded index is a guess; two plugins picking the same
+#                  one means the second silently wins
+set_own_hook() {
+    local event="$1" mark="$2" cmd="$3" existing idx used
+    existing="$(tmux show-hooks -g 2>/dev/null | grep "^${event}\[" || true)"
+    idx="$(printf '%s\n' "$existing" | grep -F -- "$mark" \
+           | head -1 | sed -E 's/^[^[]*\[([0-9]+)\].*/\1/')"
+    if [ -z "$idx" ]; then
+        used="$(printf '%s\n' "$existing" | sed -E 's/^[^[]*\[([0-9]+)\].*/\1/')"
+        idx=0
+        while printf '%s\n' "$used" | grep -qx "$idx"; do idx=$((idx + 1)); done
+    fi
+    tmux set-hook -g "${event}[${idx}]" "$cmd" 2>/dev/null || true
+}
+
+# The nested `tmux display -p` is required rather than inlining #{pane_id}: tmux expands
+# a hook command's format strings against the current client, not the event's target, so
+# the inline form reports the wrong pane for most navigation.
+install_visit_hooks() {
+    local cmd="run-shell -b \"$REPO_DIR/bin/lru_bump.sh \\\"\$(tmux display -p '#{pane_id}')\\\"\""
+    local event
+    for event in after-select-window after-select-pane client-session-changed; do
+        set_own_hook "$event" "lru_bump.sh" "$cmd"
+    done
+}
+
+# --hooks-only: reinstall just the visit hooks and exit. Invoked from a client-attached
+# hook (see below), which is the only way to survive a plugin that loads after us and
+# sets one of these events *unindexed* — that resets the whole array, so no choice of
+# index protects us. A client attaches only after the config has finished sourcing, so
+# by then every plugin has had its turn.
+#
+# Deliberately does not re-register the client-attached hook itself: that would recurse.
+if [ "${1:-}" = "--hooks-only" ]; then
+    install_visit_hooks
+    exit 0
+fi
+
 # --- dependency checks -------------------------------------------------------------
 #
 # These features fail at keypress with cryptic errors rather than at install, so it's
@@ -110,34 +156,14 @@ done
 # Records which pane you actually visited, for the picker's "recent" mode. tmux has no
 # last-visited timestamp — #{window_activity} is last-*output* time, so an agent
 # printing into a window you never looked at would top a recency list.
-#
-# Index selection is deliberate. tmux hooks are array options, and the three ways to
-# set one all misbehave differently:
-#   * unindexed  — resets the whole array, silently deleting other tools' hooks
-#   * -a append  — never idempotent: one extra copy per config reload, and the hook
-#                  then runs once per copy on every navigation
-#   * indexed    — safe, but a hardcoded index is a guess: two plugins picking the same
-#                  one means the second silently wins
-# So: reuse the index already holding our command if there is one (idempotent), else
-# take the first free index (collision-free, and never touches anyone else's).
-#
-# The nested `tmux display -p` is required rather than inlining #{pane_id}: tmux
-# expands a hook command's format strings against the current client, not the event's
-# target, so the inline form reports the wrong pane for most navigation.
 if [ "$(opt @sentinel-track-visits on)" = "on" ]; then
-    LRU_CMD="run-shell -b \"$REPO_DIR/bin/lru_bump.sh \\\"\$(tmux display -p '#{pane_id}')\\\"\""
-    for event in after-select-window after-select-pane client-session-changed; do
-        existing="$(tmux show-hooks -g 2>/dev/null | grep "^${event}\[" || true)"
-        # Already installed? reuse that slot.
-        idx="$(printf '%s\n' "$existing" | grep -F -- "lru_bump.sh" \
-               | head -1 | sed -E 's/^[^[]*\[([0-9]+)\].*/\1/')"
-        if [ -z "$idx" ]; then
-            used="$(printf '%s\n' "$existing" | sed -E 's/^[^[]*\[([0-9]+)\].*/\1/')"
-            idx=0
-            while printf '%s\n' "$used" | grep -qx "$idx"; do idx=$((idx + 1)); done
-        fi
-        tmux set-hook -g "${event}[${idx}]" "$LRU_CMD" 2>/dev/null || true
-    done
+    install_visit_hooks
+    # Re-assert once a client attaches. Choosing a free index protects us from another
+    # plugin picking the same index, but nothing protects us from one setting the same
+    # event *unindexed*, which wipes the array outright. Attach happens after the whole
+    # config is sourced, so this runs last regardless of plugin load order.
+    set_own_hook client-attached "sentinel.tmux --hooks-only" \
+        "run-shell -b \"$REPO_DIR/sentinel.tmux --hooks-only\""
 fi
 
 # --- keybindings -------------------------------------------------------------------
@@ -154,16 +180,33 @@ fi
 POPUP_W="$(opt @sentinel-popup-width 85%)"
 POPUP_H="$(opt @sentinel-popup-height 70%)"
 # "root" binds without the prefix; "prefix" requires it first.
+# Default table for keys that don't name one themselves.
 KEY_TABLE="$(opt @sentinel-key-table root)"
 
+# Each key may name its own table with a "prefix:" or "root:" marker:
+#
+#     set -g @sentinel-key-unseen  'C-Space'            # default table
+#     set -g @sentinel-key-session 'prefix:e'           # prefix table
+#     set -g @sentinel-key-mru     'C-Tab prefix:u'     # both: root key + fallback
+#
+# The two tables differ in reliability, not only in speed. A root key reaches tmux only
+# if the terminal passes it through: Option-Space and Ctrl-Tab both need terminal
+# support and are often claimed by the terminal or the OS. A prefix key needs only the
+# prefix itself, which is a plain control byte, so tmux reads whatever follows. Mixing
+# the two lets a fast root key coexist with a dependable prefix fallback.
 bind_mode() {
-    local key="$1" mode="$2"
+    local key="$1" mode="$2" table="$KEY_TABLE"
     [ -n "$key" ] && [ "$key" != "none" ] || return 0
+    case "$key" in
+        prefix:*) table=prefix; key="${key#prefix:}" ;;
+        root:*)   table=root;   key="${key#root:}" ;;
+    esac
+    [ -n "$key" ] || return 0
     local cmd="PYTHONPATH=$REPO_DIR python3 -S $REPO_DIR/tmux_sentinel/picker.py --mode=$mode"
     # Branch rather than splatting a possibly-empty flags array: under `set -u`,
     # expanding an empty array is a fatal "unbound variable" in bash 3.2, which is
     # what macOS ships as /bin/bash.
-    if [ "$KEY_TABLE" = "root" ]; then
+    if [ "$table" = "root" ]; then
         tmux bind-key -n "$key" display-popup -w "$POPUP_W" -h "$POPUP_H" -E "$cmd" \
             2>/dev/null || warn "could not bind '$key' (check the key name)"
     else
@@ -172,8 +215,22 @@ bind_mode() {
     fi
 }
 
-bind_mode "$(opt @sentinel-key-unseen  'C-Space')" unseen
-bind_mode "$(opt @sentinel-key-session 'M-Space')" session
-bind_mode "$(opt @sentinel-key-mru     'C-Tab')"   mru
+# Each mode accepts a space-separated list, so one mode can have both a root key and a
+# prefix fallback. This is what removes the need for a hand-written extra binding.
+#
+# Space is the separator rather than a comma because no tmux key name contains a space —
+# the space key itself is spelled "Space". A comma would have made the literal "," key
+# impossible to bind, since it would split into empty fields.
+bind_modes() {
+    local mode="$1" list="$2" key
+    # Deliberately unquoted: word splitting on whitespace is the point here.
+    for key in $list; do
+        bind_mode "$key" "$mode"
+    done
+}
+
+bind_modes unseen  "$(opt @sentinel-key-unseen  'C-Space')"
+bind_modes session "$(opt @sentinel-key-session 'M-Space')"
+bind_modes mru     "$(opt @sentinel-key-mru     'C-Tab')"
 
 exit 0

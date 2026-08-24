@@ -243,7 +243,7 @@ All optional; defaults shown. Set them before the `sentinel.tmux` line.
 set -g @sentinel-key-unseen    'C-Space'   # triage view; 'none' to disable
 set -g @sentinel-key-session   'M-Space'   # grouped by session
 set -g @sentinel-key-mru       'C-Tab'     # most recently visited
-set -g @sentinel-key-table     'root'      # 'root' = no prefix, 'prefix' = prefix first
+set -g @sentinel-key-table     'root'      # default table for keys that don't name one
 set -g @sentinel-popup-width   '85%'
 set -g @sentinel-popup-height  '70%'
 set -g @sentinel-track-visits  'on'        # 'off' disables the visit-tracking hooks
@@ -255,6 +255,21 @@ set -g @sentinel-status-interval '5'
 Use `none` rather than an empty string to disable a key: tmux reports an option set to
 `''` identically to one that was never set, so an empty value just falls back to the
 default.
+
+**Key tables.** A key can name its own table with a `prefix:` or `root:` marker, and a
+mode can take several keys separated by spaces:
+
+```tmux
+set -g @sentinel-key-unseen  'C-Space'         # default table (root)
+set -g @sentinel-key-session 'prefix:e'        # prefix table: press the prefix, then e
+set -g @sentinel-key-mru     'C-Tab prefix:u'  # both — a fast key and a fallback
+```
+
+The two tables differ in reliability, not only in speed. A root key reaches tmux only if
+the terminal passes it through, and keys like `M-Space` or `C-Tab` are often claimed by
+the terminal or the OS. A prefix key needs only the prefix itself, which is a plain
+control byte, so tmux reads whatever follows. Giving a mode one of each means a terminal
+that swallows your fast key does not leave the mode unreachable.
 
 Display settings — column widths, preview size — live in `~/.tmux-sentinel/config.toml`
 instead, because the picker reads them per-invocation and shouldn't pay a `show-option`
