@@ -271,6 +271,21 @@ the terminal or the OS. A prefix key needs only the prefix itself, which is a pl
 control byte, so tmux reads whatever follows. Giving a mode one of each means a terminal
 that swallows your fast key does not leave the mode unreachable.
 
+One fallback scheme worth considering is the letter that switches to the same mode inside
+the popup — `M-u`, `M-s`, `M-r` — so there is one letter per mode, Alt inside the popup
+and plain after the prefix:
+
+```tmux
+set -g @sentinel-key-unseen  'C-Space prefix:u'
+set -g @sentinel-key-session 'M-Space prefix:s'
+set -g @sentinel-key-mru     'C-Tab prefix:r'
+```
+
+It costs you two tmux defaults: `prefix s` (`choose-tree -Zs`, though session mode shows
+the same tree with more in it, and `prefix w` still gives the window tree) and `prefix r`
+(`refresh-client`). Keep the letters unmodified — `prefix M-u` would need the terminal to
+send Meta, which is the failure the fallback exists to survive.
+
 Display settings — column widths, preview size — live in `~/.tmux-sentinel/config.toml`
 instead, because the picker reads them per-invocation and shouldn't pay a `show-option`
 subprocess for each. See [Configuration](#configuration).
