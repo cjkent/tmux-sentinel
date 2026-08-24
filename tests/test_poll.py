@@ -160,10 +160,11 @@ def test_marker_rejects_empty():
 # reaching the daemon (resumed session, /compact continuation, dropped hook).
 # The poll promotes such a pane when the screen shows a live turn.
 
-def _run_poll_with(monkey_tails, state):
+def _run_poll_with(monkey_tails, state, focused=""):
     """Run one poll cycle with tmux/process calls stubbed out.
 
-    monkey_tails maps pane_id -> captured text.
+    monkey_tails maps pane_id -> captured text. focused is the pane the user is
+    looking at; the default of "" means nothing is focused, so no mark_seen.
     """
     import tmux_sentinel_daemon.poll as pm
 
@@ -180,7 +181,7 @@ def _run_poll_with(monkey_tails, state):
         pm.pane_pids = lambda: {p: "1000" for p in panes}
         pm._get_process_tree = lambda: {}
         pm.get_agent_panes = lambda pp, process_tree=None: set(panes)
-        pm.focused_pane_id = lambda: ""          # nothing focused: no mark_seen
+        pm.focused_pane_id = lambda: focused
         pm.list_panes = lambda: []
         pm.get_agent_types = lambda pp, process_tree=None: {p: "claude" for p in panes}
         pm._fix_window_names = lambda *a, **k: None
@@ -215,6 +216,31 @@ def test_poll_does_not_promote_on_finished_turn_text():
     state.ensure("7").status = IDLE
     _run_poll_with({"7": "✻ Crunched for 1m 9s\n❯ \n"}, state)
     assert state.get("7").status == IDLE
+
+
+# --- the working -> waiting demotion in run_poll ---
+
+def test_poll_marks_a_detected_approval_prompt_unseen():
+    # A mid-turn approval prompt fires no hook, so the poller is the only thing that
+    # sees it. Without the flag the pane sorted to the top of the picker's unseen list
+    # carrying no dot, and the cursor, which keyed on the dot, skipped it.
+    state = DaemonState()
+    ps = state.ensure("7")
+    ps.status = WORKING
+    _run_poll_with({"7": "Bash(rm -rf build) requires approval\n(f) Approve all pending"}, state)
+    assert state.get("7").status == WAITING
+    assert state.get("7").unseen is True
+
+
+def test_poll_leaves_a_focused_approval_prompt_seen():
+    # You are looking at it, so it is not unseen. mark_seen at the end of the same poll
+    # clears the flag, which is why setting it above can be unconditional.
+    state = DaemonState()
+    ps = state.ensure("7")
+    ps.status = WORKING
+    _run_poll_with({"7": "Do you want to proceed?"}, state, focused="7")
+    assert state.get("7").status == WAITING
+    assert state.get("7").unseen is False
 
 
 def test_poll_promotion_sets_timestamp():

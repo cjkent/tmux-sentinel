@@ -144,6 +144,16 @@ def run_poll(state: DaemonState) -> None:
             actual = _detect_pane_state(pane_id, agent_type)
             if actual == WAITING:
                 ps.status = WAITING
+                # An approval prompt is the strongest call for a human, so it counts as
+                # unseen. The Stop hook already does this for a question-shaped reply,
+                # but a mid-turn approval prompt fires no hook at all — the poller is
+                # the only thing that sees it. Without this the pane sorted to the top
+                # of the unseen list with no dot, and the cursor, which looked for the
+                # dot, fell back to the pane you were already in.
+                #
+                # Unconditional: mark_seen at the end of this poll clears the flag again
+                # if this is the focused pane, so a prompt you're looking at stays seen.
+                ps.unseen = True
             elif actual == IDLE:
                 ps.status = IDLE
                 ps.unseen = True

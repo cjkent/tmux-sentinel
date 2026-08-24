@@ -149,6 +149,21 @@ def test_unseen_cursor_falls_back_to_focused_pane():
     assert _cursor_row(_lines("   a", "►  b"), MODE_UNSEEN) == 2
 
 
+def test_unseen_cursor_lands_on_a_waiting_pane_with_no_dot():
+    # A mid-turn approval prompt fires no hook, so the poller is the only thing that
+    # sees it. It sorts to the top either way, but used to carry no ● — and a cursor
+    # keyed to the ● alone then fell back to the pane you were already in.
+    assert _cursor_row(_lines("   a [WAI]", "►  b [WRK]"), MODE_UNSEEN) == 1
+    assert _cursor_row(_lines("►  a [WRK]", "   b [ERR]"), MODE_UNSEEN) == 2
+
+
+def test_unseen_cursor_skips_the_focused_pane():
+    # ► can now match, since a focused pane may itself be waiting. Landing on it would
+    # make the keypress do nothing, so it only wins as the fallback.
+    assert _cursor_row(_lines("►  a [WAI]", "   b [IDL]"), MODE_UNSEEN) == 1
+    assert _cursor_row(_lines("►  a [WAI]", "   b [ERR]"), MODE_UNSEEN) == 2
+
+
 def test_mru_cursor_skips_focused_pane_only_at_the_top():
     # Keyed to row 1, not to wherever ► is: window_activity is last-*output* time, so
     # a chattier agent elsewhere often outranks the pane you're sitting in. Stepping

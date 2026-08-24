@@ -565,7 +565,8 @@ def _cursor_row(fzf_input: str, mode: str) -> int:
 
     Per mode, because the useful starting point differs:
       session — the focused pane, answering "where am I" the instant it opens
-      unseen  — the first row needing attention, falling back to the focused pane
+      unseen  — the first row needing attention, other than the focused pane; falling
+                back to the focused pane when nothing does
       mru     — the top row, i.e. the most recent; but if that's the pane you're
                 already in, the one below it, since selecting your own pane is a no-op
 
@@ -589,8 +590,17 @@ def _cursor_row(fzf_input: str, mode: str) -> int:
             return 2
         return 1 if lines else 0
     if mode == MODE_UNSEEN:
+        # Anything the sort ranked above "seen and quiet" counts, not the ● alone. A pane
+        # blocked on an approval prompt sorts to the very top yet may carry no dot, so
+        # keying on the dot alone sent the cursor past the one row that wanted a human.
+        # The status labels are the same signal the sort uses, so the two agree.
+        #
+        # The focused pane is skipped: it can now match (a ► row may carry [WAI]), and
+        # landing on the pane you are already in makes the keypress do nothing.
         for i, line in enumerate(lines, start=1):
-            if "●" in line:
+            if i == current:
+                continue
+            if "●" in line or "[WAI]" in line or "[ERR]" in line:
                 return i
         return current
     return current
