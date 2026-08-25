@@ -14,25 +14,14 @@
   and its stricter-pattern reasoning applies there too.
 
 - **Portability: open items for other users** → [PORTABILITY.md](PORTABILITY.md)
-  Audit of what's specific to this machine/setup. The two blockers are fixed (setup.sh
+  Audit of what's specific to this machine/setup. The blockers are all fixed (setup.sh
   aborted for anyone without Kiro; the status bar required `nc -U`, absent on some
-  Linux). Still open: agent detection is process-name based, scrape patterns assume
-  Claude Code's current English UI, emoji/glyph assumptions, and setup overwrites
-  `status-right` wholesale.
+  Linux; setup overwrote `status-right` wholesale — the plugin now only substitutes a
+  placeholder). Still open, and all judgement calls rather than defects: agent detection
+  is process-name based, scrape patterns assume Claude Code's current English UI, and
+  the picker assumes emoji/glyph coverage.
 
 ## Ideas
-
-- **Package as a tmux plugin (TPM)** — Roughly a day. The blocker isn't packaging, it's that `setup.sh` is interactive (10 `read` prompts plus an fzf multi-select) and edits other tools' config files, neither of which TPM can do: it runs a root-level `*.tmux` file non-interactively on every tmux start.
-
-  What it needs:
-  - **Split setup in two.** A non-interactive, idempotent `sentinel.tmux` for bindings, options, hooks and the status bar; `setup.sh` keeps the part that must stay opt-in — injecting hooks into `~/.kiro/agents/*.json` and `~/.claude/settings.json`. A plugin silently rewriting another tool's config on every tmux start isn't acceptable.
-  - **Config via tmux options** (`@sentinel-*`, read with `show-option -gqv`), which is the TPM convention. This one change *simplifies* things: the plugin file re-runs on reload, so it can rebuild the bindings from options — which finally makes popup geometry an ordinary setting and retires `bin/set-popup-size.sh`. Keep `config.toml` for the Python-side display caps, which are read per-invocation and shouldn't pay a `show-option` subprocess each.
-  - **Stop clobbering `status-right`** (`setup.sh:302` overwrites it wholesale). Convention is a placeholder the user positions themselves, e.g. `set -g status-right '#{sentinel_status} %H:%M'`, substituted into the existing value. Already tracked in [PORTABILITY.md](PORTABILITY.md); being a plugin forces it.
-  - **Hook installation needs two independent fixes** (see the entry below). Neither matters for a hand-managed `~/.tmux.conf`, where you control load order and can see which indices are free; both matter under TPM, where you control neither.
-
-  - **Dependency check that fails loudly.** Python 3.11+, fzf 0.30+, tmux 3.2+. There's no stdout at tmux start, so `display-message` a one-line warning rather than breaking silently.
-
-  **Worth deciding first whether it's worth it.** TPM buys `prefix+I` install and auto-update, but hook injection still needs a manual `./setup.sh`, so it's a two-step install either way. If the goal is just "easier to try", a better README or a one-line installer gets most of the value for an hour rather than a day.
 
 - **What a plugin-only install gives you (no `setup.sh`)** — Verified: agent detection is entirely hookless. The `ps` tree walk finds every agent and the screen-scrape classifies them, so the picker is fully functional on its own.
 
@@ -47,25 +36,7 @@
   - **Agent cwd** — falls back to the shell's `pane_current_path` (the shallow-path issue above).
   - **`WAI` from a trailing `?`** — Kiro-only, and the response text comes from the hook.
 
-  So *switching* works fully; *notification* doesn't. Which means `sentinel.tmux` should `display-message` a one-line nudge on first run ("run ./setup.sh to enable notifications") rather than leaving people to conclude the unseen dot is broken.
-
-- **Make the LRU hook installation robust (needed before shipping as a plugin)** — tmux hooks are array options, and the three ways to set one each fail differently. Verified:
-
-  | Form | Idempotent | Preserves other tools' hooks |
-  |---|---|---|
-  | `set-hook -g name cmd` (unindexed) | yes | **no — resets the whole array** |
-  | `set-hook -ga name cmd` (append) | **no — one copy per config reload** | yes |
-  | `set-hook -g name[10] cmd` (indexed) | yes | yes, *unless* someone collides on the index |
-
-  We use the indexed form, which is the best of the three, but it has two distinct weaknesses:
-
-  1. **The index is a guess, not a reservation.** Two plugins both choosing `[10]` means the second silently overwrites the first — no error, no log. Fix: don't hardcode. Scan the existing array; if an entry already holds our command (match on our script path) reuse that index, else take the first free one. That's idempotent, collision-free and non-destructive at once. Prototyped and confirmed: with `[0]` and `[1]` already occupied, ours landed at `[2]`, and re-running kept `[2]`.
-
-  2. **No index survives someone else's unindexed set.** An unindexed `set-hook` resets the array wholesale, so a plugin loading after us wipes our hook whatever index we chose. This already happened: our hooks were placed above the `source-file .../lru.conf` line in `~/.tmux.conf`, and tmux-switch — which sets `after-select-window` and `client-session-changed` unindexed — deleted them on the next load. Only `after-select-pane` survived, because tmux-switch doesn't set that one. Fix: re-assert the hooks after all plugins have loaded, e.g. from a `client-attached` hook, with care not to redo the work on every attach.
-
-  Note the failure is silent in both cases: the recent-mode ordering just quietly stops updating, with nothing in any log. Worth a self-check that warns once via `display-message` if the hook has gone missing.
-
-  Also worth knowing why `-a` isn't the easy way out: it appends unconditionally, and a tmux config is sourced repeatedly (server start, `prefix+r`-style reload, TPM's `prefix+I`/`prefix+U`). Each pass adds another copy and nothing removes the old ones, so the hook *runs* once per copy — measured: 3 appends gave 3 script invocations for a single window switch. These hooks fire on every navigation, so that's waste on the hottest path, and it degrades invisibly because the LRU result stays correct (`lru_bump` dedupes).
+  So *switching* works fully; *notification* doesn't — see the nudge entry under TODOs.
 
 - **Native OS notifications** — Fire a macOS notification (via `osascript`) when an agent hits a permission prompt or finishes, but only when the terminal doesn't have OS focus (so you're not pinged while already looking at it). Requires `focus-events on` in tmux or an `osascript` frontmost-app check.
 
@@ -82,7 +53,35 @@
 
 - **Colour unseen/current window names in the picker** — Colour the unseen rows' window name bold red and the current row's green, so they're findable at a glance when many windows are listed (the leading markers are small). The wrinkle that stalled this: injecting ANSI codes into the name *before* `align_columns` inflates the measured column width (`_display_width` counts every char), breaking alignment — so the colouring has to happen after alignment, in `_colorize_line`, which only sees the joined line. Worth folding into the picker-modes work, since that rewrites the same row/render path.
 
+- **Warn once when a visit hook has gone missing** — `sentinel.tmux` now picks a free index and re-asserts from `client-attached`, so the two known ways of losing a hook are covered. What's left is that *any* remaining failure is silent: recent mode quietly stops updating and nothing appears in any log. A self-check that counts our entries in the three hook arrays and `display-message`s once if one is absent would turn a silent degradation into a visible one. Low effort; the value is entirely in the diagnosis.
+
+- **Nudge a plugin-only user towards `setup.sh`** — Installing the plugin without running `./setup.sh` gives a fully working picker but no notification at all: no bell, no `[ERR]`, elapsed time measured from discovery rather than from the prompt, and `unseen` inferred only from a transition the poll happens to observe. Nothing says so, so the reasonable conclusion is that the unseen dot is broken. `sentinel.tmux` should `display-message` a one-line nudge when it finds no agent hooks installed. See the plugin-only entry under Ideas for the full list of what's lost.
+
 ## Done
+
+- **Unseen-mode cursor skipped a pane blocked on approval** (`709dcbd`) — The pane sorted to the top correctly but the cursor landed on row 2. Two causes: `poll.py` promoted `WORKING` → `WAITING` without setting `unseen`, so the row carried no `●` (the `Stop` hook sets it for a question-shaped reply, but a mid-turn approval prompt fires no hook, leaving the poller as the only witness); and `_cursor_row` keyed the unseen mode on the `●` alone, so with no dot it fell back to the pane you were already in. The cursor now also accepts `[WAI]` and `[ERR]`, which is the same signal the sort uses, and skips the focused row.
+
+- **Ship as a tmux plugin** (`c8795b7`, `8e76cae`, `5acfea1`, `732e74f`, `18bc385`) — `sentinel.tmux` at the repo root, installable with TPM or tpack. It is non-interactive and idempotent, so it can run on every tmux start and on `prefix+I`/`prefix+U`. Ten `@sentinel-*` options cover the three mode keys, the key table, popup geometry, visit tracking, the bell options and the status interval. Rebuilding the bindings from options on every load is what made popup geometry an ordinary setting and retired `bin/set-popup-size.sh`.
+
+  Four decisions worth keeping:
+  - **Agent hooks stay in `setup.sh`.** They live in other tools' config files (`~/.kiro/agents/*.json`, `~/.claude/settings.json`), and a plugin rewriting those on every tmux start would be indefensible. Install is therefore two steps by design. `setup.sh` shrank to agent hooks plus two interactive offers (add the `run-shell` line; append the status placeholder).
+  - **`status-right` is substituted, never assigned.** The user writes `#{sentinel_status}` where they want the segment. With no placeholder the plugin leaves the bar alone. Substitution is idempotent by construction: after it runs the placeholder is gone.
+  - **Dependencies gate the whole plugin.** Python 3.11+, fzf 0.30+, tmux 3.2+, each checked with a `display-message` warning, because there is no stdout at tmux start and the alternative is a cryptic failure at keypress.
+  - **A key may name its own table** with a `prefix:` or `root:` marker, and a mode takes a space-separated list, so one mode can have a fast root key *and* a dependable prefix fallback. Space rather than comma as the separator, because no tmux key name contains a space but the literal `,` key exists.
+
+- **Robust visit-hook installation** — tmux hooks are array options, and all three ways to set one fail differently. Verified empirically:
+
+  | Form | Idempotent | Preserves other tools' hooks |
+  |---|---|---|
+  | `set-hook -g name cmd` (unindexed) | yes | **no — resets the whole array** |
+  | `set-hook -ga name cmd` (append) | **no — one copy per config reload** | yes |
+  | `set-hook -g name[10] cmd` (indexed) | yes | yes, *unless* someone collides on the index |
+
+  `set_own_hook()` in `sentinel.tmux` takes the indexed form and removes its guesswork: it scans the array, reuses the index already holding our command, and otherwise takes the first free one. That is idempotent, collision-free and non-destructive at once. Confirmed with `[0]` and `[1]` occupied — ours landed at `[2]` and stayed there on re-runs.
+
+  No index survives someone else's *unindexed* set, though, which wipes the array wholesale. This had already bitten us: our hooks sat above the `source-file .../lru.conf` line, and tmux-switch sets `after-select-window` and `client-session-changed` unindexed, so it deleted two of the three on the next load. Only `after-select-pane` survived, because tmux-switch does not set that one. The fix is a `client-attached` hook that re-runs `sentinel.tmux --hooks-only`; a client attaches only after the config has finished sourcing, so it runs last whatever the plugin order. Verified: an unindexed wipe removes our hook, the next attach restores it, the other tool's hook survives, and four repeated attaches leave the counts unchanged.
+
+  Why `-a` is not the easy way out: a tmux config is sourced repeatedly (server start, reload, `prefix+I`/`prefix+U`), each pass appends another copy, and the hook then *runs* once per copy — measured, 3 appends gave 3 invocations for one window switch. These hooks fire on every navigation, so that is waste on the hottest path, and it degrades invisibly because the result stays correct (`lru_bump` dedupes).
 
 - **Picker multi-mode redesign** (`ca1d799`, `cc83671`, `74408a7`, `c8023b5`, `09fe491`) — Delivered [PICKER-MODES-PLAN.md](PICKER-MODES-PLAN.md) in full: session headers dropped for a session column, and three sort modes (`unseen` default, `session`, `mru`) with per-mode cursor placement, `--mode=X` launch keys and in-popup Alt-u/s/r switching.
 
