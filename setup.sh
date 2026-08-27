@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # tmux-sentinel setup
 #
 # Configures tmux and Kiro CLI for agent status tracking. Does three things:

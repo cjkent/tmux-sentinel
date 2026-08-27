@@ -6,7 +6,8 @@ recorded here rather than fixed, because each is a judgement call about how far 
 for other people's setups.
 
 Findings were verified by reading the code and, where possible, by running it — noted
-per item. Audited at commit `76e51ae`.
+per item. First audited at commit `76e51ae`; re-audited at `ce370bc`, after the plugin
+work added `sentinel.tmux`, `install.py` and `bin/lru_bump.sh`.
 
 ## Fixed
 
@@ -42,6 +43,21 @@ per item. Audited at commit `76e51ae`.
   install. `setup.sh` now gates on each. (The first version-comparison I wrote was
   inverted — it passed 3.1 and rejected 3.3 — so the `ver_lt` helper is deliberately
   explicit about the equality case.)
+
+- **`ps` could clip the command line on Linux.** `_get_process_tree` ran
+  `ps -eo pid,ppid,args`. procps — the Linux `ps` — can clip the `args` column to the
+  screen width, and detection depends on the *whole* line: an agent is recognised by a
+  substring of it, and a pane's own agent by walking pids up the tree. Measured on this
+  machine, real agent command lines run to ~2000 characters (a node interpreter path
+  followed by a deep path into the package), so a clip near 80 columns would drop the
+  distinguishing part and every agent pane would show `[---]`. Now `ps -ww -eo …`;
+  `-ww` means unlimited width. Verified harmless on macOS: BSD `ps` accepts it and still
+  finds all 7 agents here.
+
+- **Two scripts hardcoded `#!/bin/bash`.** `setup.sh` and `bin/status_client.sh` assumed
+  bash lives at `/bin/bash`, which is true on macOS and mainstream Linux but not on
+  NixOS or the BSDs. Both now use `#!/usr/bin/env bash`, matching the other three
+  scripts.
 
 ## Open — worth knowing, not yet addressed
 
@@ -84,6 +100,24 @@ without emoji font coverage. Emoji are also double-width, which `_display_width`
 handles — but only for East-Asian-wide characters, so a terminal that renders them
 single-width would misalign the columns. Candidates for `config.toml`, with an
 ASCII-only fallback set.
+
+### Old LTS distros fall below the dependency floor
+
+Not a defect — the version gates in `sentinel.tmux` and `setup.sh` catch it and say so —
+but worth knowing who gets turned away. The floors are Python 3.11 (`tomllib`), fzf 0.30
+and tmux 3.2.
+
+| Distro | Python | fzf | tmux | Verdict |
+|---|---|---|---|---|
+| Ubuntu 22.04 LTS | 3.10 | 0.29 | 3.2a | **refused** on two counts |
+| Ubuntu 24.04 LTS | 3.12 | 0.44 | 3.4 | fine |
+| Debian 12 | 3.11 | 0.38 | 3.3a | fine |
+| Fedora / Arch | current | current | current | fine |
+
+Ubuntu 22.04 is supported until 2027, so this is a real population. Both blockers are
+avoidable by the user (a newer Python, fzf from a release binary), and neither is worth
+lowering the floor for: `tomllib` is the reason the config file needs no dependency, and
+the fzf floor is the `--bind` event names the picker relies on.
 
 ### Tests reference the author's paths
 

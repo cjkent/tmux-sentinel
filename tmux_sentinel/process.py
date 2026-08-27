@@ -27,7 +27,15 @@ def _get_process_tree() -> dict[str, tuple[str, str]]:
     """Return {pid: (ppid, args)} from ps. All values are strings."""
     try:
         result = subprocess.run(
-            ["ps", "-eo", "pid,ppid,args"],
+            # -ww means unlimited width. Without it, procps (the Linux ps) can clip the
+            # args column to the screen width, and detection reads the *whole* command
+            # line: an agent is identified by a substring of it, and the pane's own
+            # agent is found by walking pids up the tree. Real agent command lines here
+            # run to ~2000 characters, since they are a node interpreter path followed
+            # by a deep path into the package — so anything clipped near 80 columns
+            # would drop the distinguishing part and the pane would show [---].
+            # Harmless on macOS, where BSD ps accepts -ww and already does not clip.
+            ["ps", "-ww", "-eo", "pid,ppid,args"],
             capture_output=True,
             text=True,
             timeout=5,

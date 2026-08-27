@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Status bar client for tmux-sentinel daemon.
 # Queries the daemon for status output; lazy-starts it if not running.
 #
