@@ -646,13 +646,12 @@ def main() -> None:
     sep = "\x1f"
     current_pos = _cursor_row(fzf_input, mode)
 
-    # Build the reload and close commands for fzf.
+    # Build the commands fzf re-invokes us with.
     # -S skips Python's site-init (no pip deps here, so it's safe) — trims a
     # few ms of interpreter startup per invocation by skipping Homebrew's
     # sitecustomize.py.
     script = f"PYTHONPATH={os.environ.get('PYTHONPATH', '.')} python3 -S {__file__}"
     close_cmd = f"{script} --close {{2}}"
-    reload_cmd = f"{script} --list --mode={mode}"
     toggle_preview_cmd = f"{script} --toggle-preview"
 
     # Field 2 is the target pane id, stored without the "%" tmux wants, so the
@@ -704,7 +703,18 @@ def main() -> None:
         # (preview-bottom) don't work bound to start/load: they race the async
         # preview render, so the window flag is the reliable way to do it.
         f"--preview-window=right:{preview_width},follow,hidden",
-        "--bind", f"ctrl-x:execute-silent({close_cmd})+reload({reload_cmd})",
+        # `exclude` drops just the closed row, leaving the cursor at the same vertical
+        # position — so it now shows whatever was below, and at the end of the list it
+        # steps up to the new last row. `reload` did neither: it rebuilds the list and
+        # sends the cursor back to the top, which after closing the fifth of six panes
+        # is nowhere near where you were.
+        #
+        # It is also the cheaper of the two, since closing one pane no longer
+        # regenerates every row. The trade is honesty: `reload` would have re-read the
+        # world, so a kill that failed left the row visible, whereas the row now goes
+        # whatever the outcome. Worth it — `kill-pane` failing on a pane tmux just
+        # listed is not a case worth designing the common path around.
+        "--bind", f"ctrl-x:execute-silent({close_cmd})+exclude",
         "--bind", f"?:toggle-preview+execute-silent({toggle_preview_cmd})",
     ]
 

@@ -42,7 +42,7 @@ still turn up something none of that would catch.
   Fixing this also caught a latent bug: the old `if [ $? -ne 0 ]` tested the exit status
   of the enclosing `if`, not of the query.
 
-- **No version checks.** tmux 3.2+ (`display-popup`), fzf 0.30+ (the `--bind` event
+- **No version checks.** tmux 3.2+ (`display-popup`), fzf 0.60+ (the `exclude` action, and the `--bind` event
   names and `--preview-window` flags the picker uses), and Python 3.11+ (`tomllib`)
   are all required, and all failed at *keypress* with cryptic errors rather than at
   install. `setup.sh` now gates on each. (The first version-comparison I wrote was
@@ -122,7 +122,7 @@ values rather than distro defaults:
 | bash | 4.2.46 | 3.2 | fine — the code targets macOS 3.2 |
 | python3 | 3.13.5 (linuxbrew) | 3.11 | fine |
 | tmux | 3.7b | 3.2 | fine |
-| fzf | 0.74.2 (linuxbrew) | 0.30 | fine |
+| fzf | 0.74.2 (linuxbrew) | 0.60 | fine |
 | procps | procps-ng 3.3.10 | — | does not clip a pipe; see above |
 | git | 2.47.3 | — | unused at runtime, `.git/HEAD` is read directly |
 | `nc` | **absent** | — | falls back to Python; see below |
@@ -153,20 +153,30 @@ which is precisely what those checks are for.
 ### Old LTS distros fall below the dependency floor
 
 Not a defect — the version gates in `sentinel.tmux` and `setup.sh` catch it and say so —
-but worth knowing who gets turned away. The floors are Python 3.11 (`tomllib`), fzf 0.30
+but worth knowing who gets turned away. The floors are Python 3.11 (`tomllib`), fzf 0.60
 and tmux 3.2.
 
-| Distro | Python | fzf | tmux | Verdict |
+| Distro | Python (3.11) | fzf (0.60) | tmux (3.2) | Verdict |
 |---|---|---|---|---|
-| Ubuntu 22.04 LTS | 3.10 | 0.29 | 3.2a | **refused** on two counts |
-| Ubuntu 24.04 LTS | 3.12 | 0.44 | 3.4 | fine |
-| Debian 12 | 3.11 | 0.38 | 3.3a | fine |
+| Ubuntu 22.04 LTS | 3.10 ✗ | 0.29 ✗ | 3.2a ✓ | **refused** |
+| Ubuntu 24.04 LTS | 3.12 ✓ | 0.44 ✗ | 3.4 ✓ | **refused** |
+| Debian 12 | 3.11 ✓ | 0.38 ✗ | 3.3a ✓ | **refused** |
 | Fedora / Arch | current | current | current | fine |
 
-Ubuntu 22.04 is supported until 2027, so this is a real population. Both blockers are
-avoidable by the user (a newer Python, fzf from a release binary), and neither is worth
-lowering the floor for: `tomllib` is the reason the config file needs no dependency, and
-the fzf floor is the `--bind` event names the picker relies on.
+**The fzf floor is the binding constraint, and it turns away every current LTS.** It rose
+from 0.30 to 0.60 for the `exclude` action, which is what keeps the cursor in place when
+`ctrl-x` closes a pane. Distro fzf packages lag badly, and fzf rejects an unknown action
+rather than ignoring it, so an older build does not degrade — the picker does not open.
+
+Accepted deliberately, on the grounds that fzf is a single static Go binary and
+installing a current one is a one-line download. The alternative was to keep the 0.30
+floor and detect the version at runtime, which means two code paths where only one is
+ever exercised. If this project ever wants apt-installable dependencies, the `exclude`
+bind is the thing to revisit — and `transform` plus `$FZF_POS` gives the same cursor
+behaviour from 0.51, which is still above all three.
+
+The Python floor is worth keeping regardless: `tomllib` is the reason the config file
+needs no third-party dependency at all.
 
 ### Tests reference the author's paths
 

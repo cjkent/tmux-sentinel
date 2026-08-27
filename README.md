@@ -133,7 +133,7 @@ Keys inside the picker:
 - `enter` — focus the selected pane
 - `alt-u` / `alt-s` / `alt-r` — switch to unseen / session / recent order. (Alt rather than Ctrl because `ctrl-u` and `ctrl-r` are fzf's own clear-query and toggle-sort.)
 - `?` — toggle a preview of the highlighted pane, anchored to the bottom where the current output and any prompt are. Hidden by default, and the choice persists between popups (remembered in `~/.tmux-sentinel/preview`). Its width and line count are configurable.
-- `ctrl-x` — close the highlighted pane (tmux closes the window with its last pane)
+- `ctrl-x` — close the highlighted pane (tmux closes the window with its last pane). The cursor stays where it is, so it lands on whatever was below; at the end of the list it steps up to the new last row.
 
 Elapsed time is shown only for working agents — it reflects time since the user's last prompt, useful for spotting stuck agents.
 
@@ -178,7 +178,7 @@ bind -n M-, display-popup -w 80% -h 80% -E "/path/to/tmux-sentinel/bin/edit-conf
 
 ## Setup
 
-Prerequisites: Python 3.11+, fzf 0.30+, tmux 3.2+. (`nc` optional — see Dependencies.)
+Prerequisites: Python 3.11+, fzf 0.60+, tmux 3.2+. (`nc` optional — see Dependencies.)
 Both the plugin and `setup.sh` check these, since they otherwise fail at keypress with
 cryptic errors rather than at install.
 
@@ -340,7 +340,7 @@ tmux-sentinel/
 ## Dependencies
 
 - **Python 3.11+** — stdlib only, no pip packages. (3.11 for `tomllib`, used to read the config file.)
-- **fzf 0.30+** — fuzzy finder, used for the window picker popup and setup's multi-select.
+- **fzf 0.60+** — fuzzy finder, used for the window picker popup and setup's multi-select. The floor is set by the `exclude` action that `ctrl-x` uses (added in 0.60.0); fzf rejects an unknown action rather than ignoring it, so an older build would not open the picker at all. Note that apt-packaged fzf is often well behind — Debian 12 ships 0.38 and Ubuntu 24.04 ships 0.44 — so a release binary may be needed.
 - **nc** (optional) — the status bar uses it to query the daemon when available; falls back to a Python socket client otherwise.
 - **tmux 3.2+** — obviously. 3.2 is where `display-popup` arrived, which the picker is built on.
 

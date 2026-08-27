@@ -66,7 +66,7 @@
   Four decisions worth keeping:
   - **Agent hooks stay in `setup.sh`.** They live in other tools' config files (`~/.kiro/agents/*.json`, `~/.claude/settings.json`), and a plugin rewriting those on every tmux start would be indefensible. Install is therefore two steps by design. `setup.sh` shrank to agent hooks plus two interactive offers (add the `run-shell` line; append the status placeholder).
   - **`status-right` is substituted, never assigned.** The user writes `#{sentinel_status}` where they want the segment. With no placeholder the plugin leaves the bar alone. Substitution is idempotent by construction: after it runs the placeholder is gone.
-  - **Dependencies gate the whole plugin.** Python 3.11+, fzf 0.30+, tmux 3.2+, each checked with a `display-message` warning, because there is no stdout at tmux start and the alternative is a cryptic failure at keypress.
+  - **Dependencies gate the whole plugin.** Python 3.11+, fzf 0.60+, tmux 3.2+, each checked with a `display-message` warning, because there is no stdout at tmux start and the alternative is a cryptic failure at keypress.
   - **A key may name its own table** with a `prefix:` or `root:` marker, and a mode takes a space-separated list, so one mode can have a fast root key *and* a dependable prefix fallback. Space rather than comma as the separator, because no tmux key name contains a space but the literal `,` key exists.
 
 - **Robust visit-hook installation** — tmux hooks are array options, and all three ways to set one fail differently. Verified empirically:

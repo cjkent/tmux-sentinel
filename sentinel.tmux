@@ -100,8 +100,8 @@ if ! command -v fzf >/dev/null 2>&1; then
     exit 0
 fi
 FZF_VER="$(fzf --version 2>/dev/null | sed -n 's/^\([0-9][0-9.]*\).*/\1/p')"
-if [ -n "$FZF_VER" ] && ver_lt "$FZF_VER" "0.30"; then
-    warn "fzf 0.30+ required (found $FZF_VER) — not loading"
+if [ -n "$FZF_VER" ] && ver_lt "$FZF_VER" "0.60"; then
+    warn "fzf 0.60+ required (found $FZF_VER) — not loading"
     exit 0
 fi
 TMUX_VER="$(tmux -V 2>/dev/null | sed -n 's/^tmux \([0-9][0-9.]*\).*/\1/p')"

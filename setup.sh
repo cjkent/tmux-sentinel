@@ -175,13 +175,14 @@ if [ -n "$TMUX_VER" ] && ver_lt "$TMUX_VER" "3.2"; then
 fi
 info "tmux ${TMUX_VER:-unknown} (3.2+ required)"
 
-# fzf 0.30+ for the --bind event names and --preview-window flags the picker uses.
+# fzf 0.60+ for the `exclude` action ctrl-x uses; older releases lack it and fzf
+# rejects an unknown action outright, so the picker would not start at all.
 FZF_VER=$(fzf --version 2>/dev/null | sed -n 's/^\([0-9][0-9.]*\).*/\1/p')
-if [ -n "$FZF_VER" ] && ver_lt "$FZF_VER" "0.30"; then
-    error "fzf $FZF_VER is too old — the picker needs 0.30+"
+if [ -n "$FZF_VER" ] && ver_lt "$FZF_VER" "0.60"; then
+    error "fzf $FZF_VER is too old — the picker needs 0.60+"
     exit 1
 fi
-info "fzf ${FZF_VER:-unknown} (0.30+ required)"
+info "fzf ${FZF_VER:-unknown} (0.60+ required)"
 
 # Python 3.11+ for tomllib, used to read the config file.
 if ! python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)' 2>/dev/null; then
