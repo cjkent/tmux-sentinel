@@ -9,6 +9,11 @@ Findings were verified by reading the code and, where possible, by running it �
 per item. First audited at commit `76e51ae`; re-audited at `ce370bc`, after the plugin
 work added `sentinel.tmux`, `install.py` and `bin/lru_bump.sh`.
 
+**Nothing here has been run on Linux end to end.** The Linux findings come from reading
+the code, from macOS verification that a fix is harmless, and from live version and
+behaviour probes on an Amazon Cloud Desktop (see below). A real install on Linux could
+still turn up something none of that would catch.
+
 ## Fixed
 
 - **`setup.sh` aborted for anyone without Kiro.** An `exit 0` fired when
@@ -44,15 +49,20 @@ work added `sentinel.tmux`, `install.py` and `bin/lru_bump.sh`.
   inverted — it passed 3.1 and rejected 3.3 — so the `ver_lt` helper is deliberately
   explicit about the equality case.)
 
-- **`ps` could clip the command line on Linux.** `_get_process_tree` ran
-  `ps -eo pid,ppid,args`. procps — the Linux `ps` — can clip the `args` column to the
-  screen width, and detection depends on the *whole* line: an agent is recognised by a
-  substring of it, and a pane's own agent by walking pids up the tree. Measured on this
-  machine, real agent command lines run to ~2000 characters (a node interpreter path
-  followed by a deep path into the package), so a clip near 80 columns would drop the
-  distinguishing part and every agent pane would show `[---]`. Now `ps -ww -eo …`;
-  `-ww` means unlimited width. Verified harmless on macOS: BSD `ps` accepts it and still
-  finds all 7 agents here.
+- **`ps` now asks for unlimited width — insurance, not a fix.** `_get_process_tree` ran
+  `ps -eo pid,ppid,args`, and procps — the Linux `ps` — is documented as clipping output
+  to the screen width unless given `-w`/`-ww`. That would have been fatal rather than
+  cosmetic, because detection reads the *whole* command line: an agent is recognised by a
+  substring of it, and a pane's own agent by walking pids up the tree. Real agent command
+  lines measure ~2000 characters (a node interpreter path followed by a deep path into
+  the package), so a clip near 80 columns would drop the distinguishing part and every
+  agent pane would show `[---]`.
+
+  **Tested, and the clipping does not happen when the output is piped.** On procps-ng
+  3.3.10 the longest line was 820 characters both with and without `-ww` — so the
+  documented clipping applies to a terminal, not to a pipe, which is all we ever use.
+  The flag stays as cheap insurance against a version that behaves differently; it is
+  verified harmless on macOS, where BSD `ps` accepts it and still finds all 7 agents.
 
 - **Two scripts hardcoded `#!/bin/bash`.** `setup.sh` and `bin/status_client.sh` assumed
   bash lives at `/bin/bash`, which is true on macOS and mainstream Linux but not on
@@ -100,6 +110,45 @@ without emoji font coverage. Emoji are also double-width, which `_display_width`
 handles — but only for East-Asian-wide characters, so a terminal that renders them
 single-width would misalign the columns. Candidates for `config.toml`, with an
 ASCII-only fallback set.
+
+### Amazon Cloud Desktop — measured, and it should work
+
+The target the author actually cares about. Probed live over SSH, so these are real
+values rather than distro defaults:
+
+| | Version | Floor | |
+|---|---|---|---|
+| OS | Amazon Linux 2, kernel 5.10 | — | |
+| bash | 4.2.46 | 3.2 | fine — the code targets macOS 3.2 |
+| python3 | 3.13.5 (linuxbrew) | 3.11 | fine |
+| tmux | 3.7b | 3.2 | fine |
+| fzf | 0.74.2 (linuxbrew) | 0.30 | fine |
+| procps | procps-ng 3.3.10 | — | does not clip a pipe; see above |
+| git | 2.47.3 | — | unused at runtime, `.git/HEAD` is read directly |
+| `nc` | **absent** | — | falls back to Python; see below |
+
+Two things to know before installing.
+
+**`nc` is not installed**, so `bin/status_client.sh` takes its Python socket fallback.
+That works — it is exactly why the fallback exists — but it costs ~54ms against ~11ms,
+and it runs on every status-bar refresh. Installing any `nc` with `-U` support restores
+the fast path; the script probes for it by behaviour, so nothing needs configuring.
+
+**The PATH is the fragile part, and it is the one thing worth checking.** Both `python3`
+and `fzf` come from linuxbrew, which an interactive shell puts on the PATH. A
+non-interactive shell with a plain PATH does not:
+
+| | interactive | non-interactive |
+|---|---|---|
+| `python3` | 3.13.5 (linuxbrew) | **/usr/bin/python3 → 3.7.16, too old** |
+| `fzf` | linuxbrew | **absent** |
+
+tmux children inherit the environment of whatever started the *server*, so starting tmux
+from a normal shell is enough and nothing more is needed. But if the server is ever
+started with a minimal environment — systemd, cron, a session-restore hook — the plugin
+refuses to load and the picker key does nothing. That failure is at least loud: the
+dependency gate in `sentinel.tmux` reports the version it found via `display-message`,
+which is precisely what those checks are for.
 
 ### Old LTS distros fall below the dependency floor
 
