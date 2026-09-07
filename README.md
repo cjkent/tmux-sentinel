@@ -103,13 +103,18 @@ the active mode:
 
 | Mode | Order | Cursor starts on |
 |---|---|---|
-| `unseen` | unseen first, then by what most wants attention (waiting, error, working, idle), then recency | first unseen row |
+| `unseen` | unseen first, then by what most wants attention (waiting, error, working, idle), then recency | top row |
 | `session` | session order, then window index — the original grouped order | the focused pane |
-| `mru` | most recently *visited* first | top row, or the one below it if that's the pane you're in |
+| `mru` | most recently *visited* first | top row |
 
 Each mode has its own key, set with `@sentinel-key-unseen`, `@sentinel-key-session` and
 `@sentinel-key-mru` (see [tmux options](#tmux-options)). `unseen` is the default when the
 picker is launched without `--mode`.
+
+The two ranked modes start the cursor on the top row, because that is the row the sort
+decided you most likely want. The one exception is when the top row is the pane you are
+already in — selecting that does nothing, so the cursor steps down one. `session` has no
+notion of importance, so it anchors on the focused pane instead, answering "where am I".
 
 `mru` orders by when you last *visited* a pane. tmux has no last-visited timestamp —
 `#{window_activity}` is last-*output* time, so an agent printing into a window you never

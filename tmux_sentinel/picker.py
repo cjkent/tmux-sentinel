@@ -565,10 +565,11 @@ def _cursor_row(fzf_input: str, mode: str) -> int:
 
     Per mode, because the useful starting point differs:
       session — the focused pane, answering "where am I" the instant it opens
-      unseen  — the first row needing attention, other than the focused pane; falling
-                back to the focused pane when nothing does
-      mru     — the top row, i.e. the most recent; but if that's the pane you're
-                already in, the one below it, since selecting your own pane is a no-op
+      unseen  — the top row, since the sort already put the most deserving one there
+      mru     — the top row too, i.e. the most recently visited
+
+    For both ranked modes, the focused pane is stepped over when it lands on top:
+    selecting the pane you are already in is a no-op, so it would waste the keypress.
 
     Row indices map straight to fzf item positions because --no-sort and --reverse
     keep the input order as the display order.
@@ -580,29 +581,24 @@ def _cursor_row(fzf_input: str, mode: str) -> int:
             current = i
             break
 
-    if mode == MODE_MRU:
-        # Deliberately keyed to row 1, not to wherever the focused pane happens to be.
-        # tmux's window_activity is last-*output* time, not last-focus time, so a
-        # chattier agent elsewhere can outrank the pane you're sitting in — the focused
-        # pane is often not the top row. Stepping past it wherever it appeared would
-        # land the cursor on an arbitrary row and skip the most recent target.
+    if mode in (MODE_UNSEEN, MODE_MRU):
+        # Trust the sort, don't re-derive its intent from the rendered row. Both modes
+        # rank the list so that row 1 is the one you most likely want — unseen first and
+        # then by what wants a human for `unseen`, last visited for `mru` — so the answer
+        # is simply row 1.
+        #
+        # This started out scanning for a marker instead, and got it wrong twice: keyed
+        # to ● it skipped a pane blocked on an approval prompt (which may carry no dot),
+        # and once [WAI] and [ERR] were added it still skipped a lone working agent among
+        # idle ones. Every such fix is another glyph to remember, and the sort already
+        # encodes the same judgement — so it decides, and this only reads off the result.
+        #
+        # For `mru` there is a second reason not to hunt for the ►: window_activity is
+        # last-*output* time, so a chattier agent elsewhere routinely outranks the pane
+        # you are sitting in, and the focused pane is often nowhere near the top.
         if current == 1 and len(lines) > 1:
             return 2
         return 1 if lines else 0
-    if mode == MODE_UNSEEN:
-        # Anything the sort ranked above "seen and quiet" counts, not the ● alone. A pane
-        # blocked on an approval prompt sorts to the very top yet may carry no dot, so
-        # keying on the dot alone sent the cursor past the one row that wanted a human.
-        # The status labels are the same signal the sort uses, so the two agree.
-        #
-        # The focused pane is skipped: it can now match (a ► row may carry [WAI]), and
-        # landing on the pane you are already in makes the keypress do nothing.
-        for i, line in enumerate(lines, start=1):
-            if i == current:
-                continue
-            if "●" in line or "[WAI]" in line or "[ERR]" in line:
-                return i
-        return current
     return current
 
 

@@ -141,51 +141,52 @@ def test_session_cursor_lands_on_focused_pane():
     assert _cursor_row(_lines("   a", "   b", "►  c"), MODE_SESSION) == 3
 
 
-def test_unseen_cursor_lands_on_first_unseen():
-    assert _cursor_row(_lines("   a", "●  b", "►  c"), MODE_UNSEEN) == 2
+def test_ranked_cursor_lands_on_the_top_row():
+    # Both ranked modes trust the sort: row 1 is the row it decided you most likely
+    # want, so the cursor goes there and reads nothing off the row itself.
+    for mode in (MODE_UNSEEN, MODE_MRU):
+        assert _cursor_row(_lines("   a", "●  b", "►  c"), mode) == 1
+        assert _cursor_row(_lines("   a [IDL]", "   b [WAI]"), mode) == 1
 
 
-def test_unseen_cursor_falls_back_to_focused_pane():
-    assert _cursor_row(_lines("   a", "►  b"), MODE_UNSEEN) == 2
+def test_ranked_cursor_ignores_which_marker_the_top_row_carries():
+    # The three cases that broke the old marker-scanning version, one per glyph it did
+    # not know about. Each has the interesting pane on top and the focused pane below.
+    for mode in (MODE_UNSEEN, MODE_MRU):
+        # An approval prompt found by the poller: sorts top, may carry no ●.
+        assert _cursor_row(_lines("   a [WAI]", "►  b [WRK]"), mode) == 1
+        # A lone working agent among idle ones: no ●, no [WAI], no [ERR].
+        assert _cursor_row(_lines("   a [WRK]", "►  b [IDL]"), mode) == 1
+        # Nothing notable at all — still row 1, not the pane you are in.
+        assert _cursor_row(_lines("   a [IDL]", "►  b [IDL]"), mode) == 1
 
 
-def test_unseen_cursor_lands_on_a_waiting_pane_with_no_dot():
-    # A mid-turn approval prompt fires no hook, so the poller is the only thing that
-    # sees it. It sorts to the top either way, but used to carry no ● — and a cursor
-    # keyed to the ● alone then fell back to the pane you were already in.
-    assert _cursor_row(_lines("   a [WAI]", "►  b [WRK]"), MODE_UNSEEN) == 1
-    assert _cursor_row(_lines("►  a [WRK]", "   b [ERR]"), MODE_UNSEEN) == 2
+def test_ranked_cursor_steps_over_the_focused_pane_on_top():
+    # Selecting the pane you are already in is a no-op, so it would waste the keypress.
+    # Only when it is on top: elsewhere it is just another row, and stepping past it
+    # wherever it appeared would land the cursor somewhere arbitrary.
+    for mode in (MODE_UNSEEN, MODE_MRU):
+        assert _cursor_row(_lines("►  a", "   b", "   c"), mode) == 2
+        assert _cursor_row(_lines("   a", "►  b", "   c"), mode) == 1
 
 
-def test_unseen_cursor_skips_the_focused_pane():
-    # ► can now match, since a focused pane may itself be waiting. Landing on it would
-    # make the keypress do nothing, so it only wins as the fallback.
-    assert _cursor_row(_lines("►  a [WAI]", "   b [IDL]"), MODE_UNSEEN) == 1
-    assert _cursor_row(_lines("►  a [WAI]", "   b [ERR]"), MODE_UNSEEN) == 2
+def test_ranked_cursor_handles_a_single_focused_row():
+    # Nothing below the focused pane to step to.
+    for mode in (MODE_UNSEEN, MODE_MRU):
+        assert _cursor_row(_lines("►  a"), mode) == 1
 
 
-def test_mru_cursor_skips_focused_pane_only_at_the_top():
-    # Keyed to row 1, not to wherever ► is: window_activity is last-*output* time, so
-    # a chattier agent elsewhere often outranks the pane you're sitting in. Stepping
-    # past ► wherever it appeared would land on an arbitrary row.
-    assert _cursor_row(_lines("►  a", "   b", "   c"), MODE_MRU) == 2
-    assert _cursor_row(_lines("   a", "►  b", "   c"), MODE_MRU) == 1
-
-
-def test_mru_cursor_handles_single_row():
-    # Nothing below the focused pane to move to.
-    assert _cursor_row(_lines("►  a"), MODE_MRU) == 1
+def test_session_cursor_still_keys_off_the_marker():
+    # Unlike the ranked modes, session order carries no notion of importance, so "where
+    # am I" is the only useful anchor.
+    assert _cursor_row(_lines("   a [WAI]", "   b", "►  c"), MODE_SESSION) == 3
+    assert _cursor_row(_lines("   a", "   b"), MODE_SESSION) == 0
 
 
 def test_cursor_handles_empty_list():
     # 0 means "leave it at the top"; fzf's pos() is 1-based so 0 is never bound.
     for mode in (MODE_UNSEEN, MODE_SESSION, MODE_MRU):
         assert _cursor_row("", mode) == 0
-
-
-def test_cursor_zero_when_nothing_to_anchor_on():
-    assert _cursor_row(_lines("   a", "   b"), MODE_UNSEEN) == 0
-    assert _cursor_row(_lines("   a"), MODE_SESSION) == 0
 
 
 # --- CLI ---------------------------------------------------------------------------
