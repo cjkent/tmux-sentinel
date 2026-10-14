@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 
 from tmux_sentinel.status import IDLE, WORKING, WAITING, ERROR, AgentStatus, clear_unseen
 from tmux_sentinel.hook import _get_git_branch
+from tmux_sentinel.loop import loop_continues
 
 
 @dataclass
@@ -119,4 +120,9 @@ class DaemonState:
             ps.git_branch = branch
             ps.timestamp = now
             ps.has_error = False
-            ps.unseen = True
+            # Not unseen if this is one iteration of a /loop that has scheduled
+            # another: the final iteration is the one worth a dot. A question is the
+            # exception, since the loop cannot answer it for you.
+            ps.unseen = ps.status == WAITING or not loop_continues(
+                event.get("transcript_path", "")
+            )

@@ -27,6 +27,13 @@ When you run multiple AI agents (Kiro CLI or Claude Code) in separate tmux windo
 | `postToolUse` | `PostToolUse` | If the tool failed, set an error flag for the turn |
 | `stop` | `Stop` | Determine final status, ring bell, mark as unseen |
 
+A `/loop` runs every iteration as a full turn, so each would fire `Stop`. When the turn that
+is ending scheduled another iteration, the hook skips the unseen flag and the bell, so only the
+final iteration notifies. It reads that from the transcript: an iteration that continues ends having
+called `ScheduleWakeup`, and the last one calls it with `stop=true` or not at all. A turn that ends on
+a question still notifies. Only the dynamic form of `/loop` is recognised, and Kiro CLI, which sends
+no transcript path, is unaffected.
+
 The final status on `stop` is determined by:
 1. Last non-empty line of the response ends with `?` → **waiting** (Kiro CLI only; Claude Code doesn't provide response text)
 2. Any tool failed during the turn → **error**

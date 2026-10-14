@@ -21,6 +21,7 @@ import sys
 import time
 from pathlib import Path
 
+from tmux_sentinel.loop import loop_continues
 from tmux_sentinel.status import (
     IDLE, WORKING, WAITING, ERROR,
     write_status, read_status, set_error_flag, clear_error_flag,
@@ -157,9 +158,16 @@ def handle_event(event: dict, pane_id: str, status_dir: Path = None) -> None:
                 write_status(pane_id, IDLE, cwd, branch, now, status_dir=sd)
 
         clear_error_flag(pane_id, status_dir=sd)
-        set_unseen(pane_id, status_dir=sd)
-        sys.stdout.write("\a")
-        sys.stdout.flush()
+
+        # An iteration of a /loop that has scheduled another is not a result worth
+        # interrupting for: the pane goes quiet, and the final iteration notifies. A
+        # question is the exception, because the loop cannot answer it for you.
+        status_now = read_status(pane_id, status_dir=sd)
+        asking = status_now is not None and status_now.status == WAITING
+        if asking or not loop_continues(event.get("transcript_path", "")):
+            set_unseen(pane_id, status_dir=sd)
+            sys.stdout.write("\a")
+            sys.stdout.flush()
 
 
 def main() -> None:
