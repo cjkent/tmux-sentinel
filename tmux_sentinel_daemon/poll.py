@@ -73,10 +73,27 @@ def _detect_pane_state(pane_id: str, agent_type: str = "claude") -> str | None:
 # only while the user is moving between agents, on whichever row is highlighted. Most
 # captures won't have it, but if one lands mid-navigation with the running agent
 # highlighted, the line anchor would miss the row and the pane would read idle.
+# A fourth form covers background shells. A command the agent started in the background
+# keeps running after the turn ends, and the pane then reads as completely idle at an
+# empty prompt. The only live sign is a count in the footer, which also replaces the
+# "(shift+tab to cycle)" hint:
+#
+#     ⏵⏵ auto mode on · 1 shell · ← for agents
+#
+# The count is bounded by "·" on the left and by "·" or the end of the line on the
+# right. That excludes the other two places the words appear. "ran 2 shell commands" has
+# no "·" before it. And the turn-end line, "done 16:26 · 1 shell still running", stays on
+# screen after the shell exits, so matching it would hold a finished pane at WRK; its
+# "still" fails the right-hand bound. Only the footer is live.
+#
+# Counted as working because the agent will be told when the shell finishes and carry on,
+# the same reasoning as for a background agent. When the count drops out of the footer the
+# marker goes with it and the pane returns to idle, setting the unseen flag on the way.
 _WORKING_MARKER = re.compile(
     r"^[ \t]*\S[ \t]+\w+…[ \t]*\(\d"
     r"|esc to interrupt"
-    r"|^[ \t]*(?:❯[ \t]+)?[◯⏺][ \t]+\S+[ \t]{2,}.*?\b\d+[hms]\b[ \t]*(?:·|$)",
+    r"|^[ \t]*(?:❯[ \t]+)?[◯⏺][ \t]+\S+[ \t]{2,}.*?\b\d+[hms]\b[ \t]*(?:·|$)"
+    r"|^[^\n]*·[ \t]*\d+[ \t]+shells?[ \t]*(?:·|$)",
     re.MULTILINE,
 )
 

@@ -119,6 +119,66 @@ def test_poll_leaves_pane_idle_when_background_agent_finished():
     assert state.get("7").status == IDLE
 
 
+# --- background shells ---
+#
+# A command the agent started in the background keeps running after the turn ends. The
+# footer then carries a count, in place of the "(shift+tab to cycle)" hint.
+
+_SHELL_FOOTER = "  ⏵⏵ auto mode on · 1 shell · ← for agents"
+_SHELL_DONE_LINE = "✻ Worked for 35s · done 16:26 · 1 shell still running"
+_NO_SHELL_FOOTER = "  ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents"
+
+
+def test_marker_detects_a_running_background_shell():
+    assert _has_working_marker("❯\n" + _SHELL_FOOTER)
+    assert _has_working_marker("  ? for shortcuts · 3 shells")
+    assert _has_working_marker("  ⏵⏵ auto mode on · 12 shells · ← for agents")
+
+
+def test_marker_ignores_the_stale_turn_end_line():
+    # "done 16:26 · 1 shell still running" stays on screen after the shell exits, so
+    # matching it would hold a finished pane at WRK. Only the footer is live.
+    assert not _has_working_marker(_SHELL_DONE_LINE)
+    assert not _has_working_marker(_SHELL_DONE_LINE + "\n" + _NO_SHELL_FOOTER)
+
+
+def test_marker_ignores_shell_command_prose():
+    assert not _has_working_marker("Called creds-agent, ran 2 shell commands")
+    assert not _has_working_marker("  Ran 1 shell command")
+    assert not _has_working_marker("the footer shows · 1 shell command · here")
+
+
+def test_marker_ignores_a_footer_with_no_shell():
+    assert not _has_working_marker(_NO_SHELL_FOOTER)
+
+
+def test_background_shell_vetoes_the_idle_rule():
+    # The hint is not guaranteed to be absent while a shell runs. If it appeared the
+    # idle rule would match and demote the pane every cycle, so the veto must hold.
+    from tmux_sentinel_daemon.manifests import load_all_manifests, classify
+    rules = load_all_manifests()["claude"]
+    with_hint = "  ⏵⏵ auto mode on (shift+tab to cycle) · 1 shell · ← for agents"
+    assert classify(with_hint, rules) is None
+    assert classify(_NO_SHELL_FOOTER, rules) == IDLE
+
+
+def test_poll_promotes_pane_with_a_running_background_shell():
+    state = DaemonState()
+    state.ensure("7").status = IDLE
+    _run_poll_with({"7": "❯\n" + _SHELL_FOOTER}, state)
+    assert state.get("7").status == WORKING
+
+
+def test_poll_returns_pane_to_idle_once_the_shell_is_gone():
+    # The turn-end line is still on screen, but the footer count has dropped out.
+    state = DaemonState()
+    ps = state.ensure("7")
+    ps.status = WORKING
+    _run_poll_with({"7": _SHELL_DONE_LINE + "\n❯\n" + _NO_SHELL_FOOTER}, state)
+    assert state.get("7").status == IDLE
+    assert state.get("7").unseen is True
+
+
 def test_marker_rejects_pattern_quoted_in_prose():
     # A pane showing text *about* the spinner format (a conversation discussing this
     # very regex, say) must not read as working. The match is anchored to the start

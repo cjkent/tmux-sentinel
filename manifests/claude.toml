@@ -46,7 +46,13 @@ pattern = '''ask a question or describe a task'''
 # there, so classify returns None; poll.py reads that as "unknown" and leaves a WORKING
 # pane alone, stranding it on WRK after the background agent finished. The exclude
 # above still covers the running case, so treating this footer as idle is safe.
+#
+# The fourth alternative vetoes on a running background shell, shown in the footer as
+# "· 1 shell ·". Usually the footer then carries no "shift+tab to cycle" and no idle rule
+# matches anyway, but the hint is not guaranteed to be absent, and a pane with a shell
+# running must never classify as idle. See _WORKING_MARKER in poll.py for why the match is
+# bounded on both sides.
 [[rule]]
 state = "idle"
 pattern = '''shift\+tab to cycle|\? for shortcuts|manual mode on|to select · Enter to view'''
-exclude = '''esc to interrupt|\(\d+[hms]|^[ \t]*(?:❯[ \t]+)?[◯⏺][ \t]+\S+[ \t]{2,}.*?\b\d+[hms]\b[ \t]*(?:·|$)'''
+exclude = '''esc to interrupt|\(\d+[hms]|^[ \t]*(?:❯[ \t]+)?[◯⏺][ \t]+\S+[ \t]{2,}.*?\b\d+[hms]\b[ \t]*(?:·|$)|^[^\n]*·[ \t]*\d+[ \t]+shells?[ \t]*(?:·|$)'''
