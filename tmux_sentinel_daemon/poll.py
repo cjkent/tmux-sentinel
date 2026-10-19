@@ -98,6 +98,45 @@ _WORKING_MARKER = re.compile(
 )
 
 
+# --- how long background work has really been running --------------------------------
+#
+# ps.timestamp is when the pane last started working, and three things reset it to "now":
+# a new prompt, a Stop, and the idle -> working promotion above. That is right for a plain
+# turn. It is wrong once background agents are running, because the main agent takes a new
+# turn every time one of them reports back, so the clock restarts each time and the picker
+# shows "1m" for a pane whose oldest agent has been going for 45.
+#
+# Claude Code prints the true figure on screen, one row per background agent, so it is read
+# from there instead of being tracked:
+#
+#     ◯ fork  Reverting interior ground sampling in buildings.measure    45m 6s · ↓ 260.5k tokens
+#
+# The group is optional pieces in h, m, s order and must be followed by "·" or the end of
+# the line, which is what keeps a number inside the task text from being read as the timer.
+# The (?=\d) stops the all-optional group from matching empty.
+_BG_ROW_TIMER = re.compile(
+    r"^[ \t]*(?:❯[ \t]+)?[◯⏺][ \t]+\S+[ \t]{2,}.*?[ \t](?=\d)"
+    r"(?:(\d+)h[ \t]*)?(?:(\d+)m[ \t]*)?(?:(\d+)s)?[ \t]*(?:·|$)",
+    re.MULTILINE,
+)
+
+# Rows are listed below the footer, and a pane with many agents pushes the oldest (listed
+# first) out of a 10-line tail, so this reads further up than the classifier does.
+_BG_TAIL_LINES = 30
+
+
+def _oldest_background_seconds(tail: str) -> int:
+    """Seconds the longest-running background agent shown in `tail` has been going, or 0.
+
+    Finished agents end their row in the literal "idle" rather than a time, so they do
+    not match and do not count.
+    """
+    oldest = 0
+    for h, m, sec in _BG_ROW_TIMER.findall(tail):
+        oldest = max(oldest, int(h or 0) * 3600 + int(m or 0) * 60 + int(sec or 0))
+    return oldest
+
+
 def _has_working_marker(tail: str) -> bool:
     """True if the captured text shows a turn actively in progress."""
     return bool(_WORKING_MARKER.search(tail or ""))
@@ -191,6 +230,16 @@ def run_poll(state: DaemonState) -> None:
                 ps.status = WORKING
                 ps.timestamp = now
                 ps.unseen = False
+
+        # Background agents outlive the turns that start them, so whatever reset the
+        # clock above, the oldest agent's own timer says the work began earlier. Only ever
+        # moves the timestamp back: a main turn that really has run longer keeps its start.
+        if ps.status == WORKING:
+            running = _oldest_background_seconds(
+                capture_pane_tail(pane_id, lines=_BG_TAIL_LINES)
+            )
+            if running:
+                ps.timestamp = min(ps.timestamp or now, now - running)
 
     if state.focused_pane:
         state.mark_seen(state.focused_pane)

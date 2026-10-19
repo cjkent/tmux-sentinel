@@ -179,6 +179,93 @@ def test_poll_returns_pane_to_idle_once_the_shell_is_gone():
     assert state.get("7").unseen is True
 
 
+# --- elapsed time with background agents ---
+#
+# A new prompt, a Stop and the idle -> working promotion each reset ps.timestamp to now,
+# and with background agents running the main agent takes a new turn every time one
+# reports back, so the picker showed "1m" for a pane whose oldest agent was 45 minutes in.
+# The agents' own timers are on screen, so the poll reads the true figure from there.
+
+_AGENTS_RUNNING = """\
+  ⏵⏵ auto mode on (shift+tab to cycle)
+
+  ⏺ main
+  ◯ fork  Reverting interior ground sampling in buildings.measure       45m 6s · ↓ 260.5k tokens
+  ◯ fork  Inspecting cross-sections for stretches #88 and #13           16m 2s · ↓ 273.1k tokens
+  ◯ fork  Adding _along_road gate placement in network.py               16m 2s · ↓ 194.9k tokens"""
+
+
+def test_oldest_background_seconds_takes_the_longest_running_agent():
+    from tmux_sentinel_daemon.poll import _oldest_background_seconds as oldest
+    assert oldest(_AGENTS_RUNNING) == 45 * 60 + 6
+
+
+def test_oldest_background_seconds_handles_each_unit_form():
+    from tmux_sentinel_daemon.poll import _oldest_background_seconds as oldest
+    assert oldest("◯ fork  Task   1h 5m 3s · ↓ 1k") == 3903
+    assert oldest("◯ fork  Task   45s · ↓ 1k") == 45
+    assert oldest("◯ fork  Task   7m") == 420
+
+
+def test_oldest_background_seconds_ignores_finished_agents():
+    # A finished row ends in the literal "idle", not a time.
+    from tmux_sentinel_daemon.poll import _oldest_background_seconds as oldest
+    assert oldest("◯ fork  Task   idle") == 0
+    assert oldest(_BG_FINISHED) == 0
+
+
+def test_oldest_background_seconds_ignores_digits_in_the_task_text():
+    # The timer must be bounded by "·" or the end of the line, not merely follow a space.
+    from tmux_sentinel_daemon.poll import _oldest_background_seconds as oldest
+    assert oldest("◯ fork  Wait 3 gates   16m 2s · ↓ 1k") == 16 * 60 + 2
+
+
+def test_oldest_background_seconds_is_zero_without_agents():
+    from tmux_sentinel_daemon.poll import _oldest_background_seconds as oldest
+    assert oldest("❯\n  ⏵⏵ auto mode on") == 0
+    assert oldest("I ran for 45m 6s · and stopped") == 0  # prose, not a row
+
+
+def test_poll_backdates_a_clock_that_a_new_turn_just_reset():
+    import time
+    state = DaemonState()
+    ps = state.ensure("7")
+    ps.status = WORKING
+    ps.timestamp = int(time.time()) - 60          # the main agent's turn began a minute ago
+    _run_poll_with({"7": _AGENTS_RUNNING}, state)
+    assert abs((int(time.time()) - state.get("7").timestamp) - (45 * 60 + 6)) <= 2
+
+
+def test_poll_backdates_a_pane_it_just_promoted():
+    import time
+    state = DaemonState()
+    state.ensure("7").status = IDLE
+    _run_poll_with({"7": _AGENTS_RUNNING}, state)
+    assert state.get("7").status == WORKING
+    assert abs((int(time.time()) - state.get("7").timestamp) - (45 * 60 + 6)) <= 2
+
+
+def test_poll_never_moves_the_clock_forward():
+    # A main turn that has really run longer than any agent keeps its own start.
+    import time
+    state = DaemonState()
+    ps = state.ensure("7")
+    ps.status = WORKING
+    ps.timestamp = int(time.time()) - 2 * 3600
+    _run_poll_with({"7": _AGENTS_RUNNING}, state)
+    assert abs((int(time.time()) - state.get("7").timestamp) - 2 * 3600) <= 2
+
+
+def test_poll_leaves_the_clock_alone_without_background_agents():
+    import time
+    state = DaemonState()
+    ps = state.ensure("7")
+    ps.status = WORKING
+    ps.timestamp = int(time.time()) - 60
+    _run_poll_with({"7": "✽ Working… (1m 0s · ↓ 1.2k tokens)"}, state)
+    assert abs((int(time.time()) - state.get("7").timestamp) - 60) <= 2
+
+
 def test_marker_rejects_pattern_quoted_in_prose():
     # A pane showing text *about* the spinner format (a conversation discussing this
     # very regex, say) must not read as working. The match is anchored to the start
