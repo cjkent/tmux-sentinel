@@ -59,14 +59,28 @@ try:
     s.close()
     sys.stdout.write(b"".join(chunks).decode())
 except OSError:
-    pass
+    sys.exit(1)
 ' "$SOCK" "$PANE_ID" 2>/dev/null
     fi
 }
 
+# Start the daemon whenever the query cannot connect, not only when the socket file is
+# missing. A daemon that dies without cleaning up (SIGKILL, a crash, the machine
+# sleeping through a tmux restart) leaves its socket file behind, and a check on the
+# file alone then never restarts it. Nothing reported that: the picker fell back to
+# reading status files, whose unseen flags nothing clears without the daemon, so
+# windows stayed marked unseen after you had visited them.
+#
+# Safe to run while a daemon is alive, should a connection ever fail spuriously: the
+# daemon holds a single-instance flock, so a second one exits at once, and it removes a
+# stale socket file before binding.
+#
+# An empty RESULT alone is not the signal, because a live daemon answers with nothing
+# when no agent needs attention.
 RESULT=$(query)
+QUERY_STATUS=$?
 
-if [ -z "$RESULT" ] && [ ! -S "$SOCK" ]; then
+if [ "$QUERY_STATUS" -ne 0 ]; then
     PYTHONPATH="$REPO_DIR" python3 -S -m tmux_sentinel_daemon </dev/null >/dev/null 2>&1 &
     sleep 0.3
     RESULT=$(query)
