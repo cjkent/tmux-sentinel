@@ -89,11 +89,22 @@ def _detect_pane_state(pane_id: str, agent_type: str = "claude") -> str | None:
 # Counted as working because the agent will be told when the shell finishes and carry on,
 # the same reasoning as for a background agent. When the count drops out of the footer the
 # marker goes with it and the pane returns to idle, setting the unseen flag on the way.
-_WORKING_MARKER = re.compile(
+# The patterns are split by what they prove. The first two show the *main agent's own turn*
+# running. The last two show only *background work* (agents, shells) running behind an
+# otherwise idle prompt. The distinction decides whether a result is still waiting to be
+# looked at, so it matters; see the promotion in run_poll.
+_TURN_MARKER = re.compile(
     r"^[ \t]*\S[ \t]+\w+…[ \t]*\(\d"
-    r"|esc to interrupt"
-    r"|^[ \t]*(?:❯[ \t]+)?[◯⏺][ \t]+\S+[ \t]{2,}.*?\b\d+[hms]\b[ \t]*(?:·|$)"
+    r"|esc to interrupt",
+    re.MULTILINE,
+)
+_BACKGROUND_MARKER = re.compile(
+    r"^[ \t]*(?:❯[ \t]+)?[◯⏺][ \t]+\S+[ \t]{2,}.*?\b\d+[hms]\b[ \t]*(?:·|$)"
     r"|^[^\n]*·[ \t]*\d+[ \t]+shells?[ \t]*(?:·|$)",
+    re.MULTILINE,
+)
+_WORKING_MARKER = re.compile(
+    _TURN_MARKER.pattern + "|" + _BACKGROUND_MARKER.pattern,
     re.MULTILINE,
 )
 
@@ -138,8 +149,13 @@ def _oldest_background_seconds(tail: str) -> int:
 
 
 def _has_working_marker(tail: str) -> bool:
-    """True if the captured text shows a turn actively in progress."""
+    """True if the captured text shows a turn, or background work, in progress."""
     return bool(_WORKING_MARKER.search(tail or ""))
+
+
+def _has_turn_marker(tail: str) -> bool:
+    """True if the main agent's own turn is running, as opposed to only background work."""
+    return bool(_TURN_MARKER.search(tail or ""))
 
 
 _WINDOW_NAME_MAP = {"claude": "claude", "kiro": "kiro"}
@@ -226,10 +242,20 @@ def run_poll(state: DaemonState) -> None:
             # elapsed-timer marker is positive evidence of a turn in progress, so
             # promote on it — and since the turn is running, no finished-but-unseen
             # result stands.
-            if _has_working_marker(capture_pane_tail(pane_id, lines=10)):
+            tail = capture_pane_tail(pane_id, lines=10)
+            if _has_working_marker(tail):
                 ps.status = WORKING
                 ps.timestamp = now
-                ps.unseen = False
+                # A running main turn supersedes the last result, so it stops being
+                # unseen. Background work alone does not: a subagent that has just
+                # finished leaves its report to read, and the agents still running
+                # behind it do not take that away. Clearing it here made the dot appear
+                # at the Stop and vanish a few seconds later, for every subagent that
+                # finished until the last one. The pane is then both working and
+                # unseen, which is the case where there is something to look at while
+                # more is still coming.
+                if _has_turn_marker(tail):
+                    ps.unseen = False
 
         # Background agents outlive the turns that start them, so whatever reset the
         # clock above, the oldest agent's own timer says the work began earlier. Only ever

@@ -34,6 +34,12 @@ called `ScheduleWakeup`, and the last one calls it with `stop=true` or not at al
 a question still notifies. Only the dynamic form of `/loop` is recognised, and Kiro CLI, which sends
 no transcript path, is unaffected.
 
+A subagent that finishes while others are still running leaves the pane both working and
+unseen. Its report is waiting, and the agents still running behind it do not take that away, so
+the poll keeps the flag when it moves the pane back to working because of background work alone.
+Only the main agent's own running turn clears it. The status bar counts such a pane under both
+"working" and "unseen". The bell still rings at each `Stop`.
+
 The final status on `stop` is determined by:
 1. Last non-empty line of the response ends with `?` → **waiting** (Kiro CLI only; Claude Code doesn't provide response text)
 2. Any tool failed during the turn → **error**

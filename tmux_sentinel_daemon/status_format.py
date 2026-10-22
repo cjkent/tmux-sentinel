@@ -26,6 +26,10 @@ def format_status_output(state: DaemonState, requesting_pane: str) -> str:
             continue
         if ps.status == WORKING:
             working_count += 1
+            # Also unseen when a subagent has finished while others still run: there is a
+            # report to read even though the pane is still busy.
+            if ps.unseen:
+                unseen_count += 1
         elif ps.status == WAITING:
             permission_count += 1
         elif ps.unseen:

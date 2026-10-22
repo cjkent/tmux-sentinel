@@ -93,6 +93,25 @@ def test_multiple_categories():
     print("  ✓ test_multiple_categories")
 
 
+def test_working_and_unseen_counts_in_both():
+    # A subagent finished while others still run: busy, but with a report to read.
+    state = DaemonState()
+    state.apply_hook_event({"hookEventName": "Stop", "cwd": "/tmp"}, pane_id="100")
+    state.get("100").status = WORKING
+    result = format_status_output(state, "200")
+    assert "1 unseen" in result
+    assert "1 working" in result
+    print("  ✓ test_working_and_unseen_counts_in_both")
+
+
+def test_working_without_unseen_is_not_counted_unseen():
+    state = DaemonState()
+    state.apply_hook_event({"hookEventName": "UserPromptSubmit", "cwd": "/tmp"}, pane_id="100")
+    result = format_status_output(state, "200")
+    assert "unseen" not in result and "1 working" in result
+    print("  ✓ test_working_without_unseen_is_not_counted_unseen")
+
+
 if __name__ == "__main__":
     test_empty_state()
     test_working_in_other_pane()
@@ -100,4 +119,6 @@ if __name__ == "__main__":
     test_unseen()
     test_waiting_waiting()
     test_multiple_categories()
+    test_working_and_unseen_counts_in_both()
+    test_working_without_unseen_is_not_counted_unseen()
     print("\nAll tests passed")

@@ -266,6 +266,61 @@ def test_poll_leaves_the_clock_alone_without_background_agents():
     assert abs((int(time.time()) - state.get("7").timestamp) - 60) <= 2
 
 
+# --- unseen when a subagent finishes while others still run ---
+#
+# A subagent that finishes leaves a report to read, and the agents still running behind it
+# do not take that away. The promotion back to working used to clear the flag, so the dot
+# appeared at the Stop and vanished a few seconds later, for every subagent but the last.
+
+def _after_a_stop(state, pane="7"):
+    state.apply_hook_event({"hookEventName": "Stop", "cwd": "/tmp"}, pane_id=pane)
+
+
+def test_background_agents_keep_the_unseen_flag_on_promotion():
+    state = DaemonState()
+    _after_a_stop(state)
+    assert state.get("7").unseen is True
+    _run_poll_with({"7": _AGENTS_RUNNING}, state)
+    ps = state.get("7")
+    assert ps.status == WORKING
+    assert ps.unseen is True
+
+
+def test_a_background_shell_keeps_the_unseen_flag_on_promotion():
+    state = DaemonState()
+    _after_a_stop(state)
+    _run_poll_with({"7": "❯\n" + _SHELL_FOOTER}, state)
+    assert state.get("7").status == WORKING
+    assert state.get("7").unseen is True
+
+
+def test_a_running_main_turn_still_clears_the_unseen_flag():
+    # A new turn supersedes the last result, so only background-only evidence keeps it.
+    state = DaemonState()
+    _after_a_stop(state)
+    _run_poll_with({"7": "✽ Working… (30s · ↓ 1.2k tokens)"}, state)
+    assert state.get("7").status == WORKING
+    assert state.get("7").unseen is False
+
+
+def test_a_main_turn_alongside_background_agents_clears_the_unseen_flag():
+    state = DaemonState()
+    _after_a_stop(state)
+    _run_poll_with({"7": "✽ Working… (5s · ↓ 1k tokens)\n" + _AGENTS_RUNNING}, state)
+    assert state.get("7").unseen is False
+
+
+def test_marker_split_distinguishes_turn_from_background():
+    from tmux_sentinel_daemon.poll import _has_turn_marker
+    assert _has_turn_marker("✽ Working… (30s · ↓ 1.2k tokens)")
+    assert _has_turn_marker("esc to interrupt")
+    assert not _has_turn_marker(_AGENTS_RUNNING)
+    assert not _has_turn_marker("❯\n" + _SHELL_FOOTER)
+    # Everything either half matches is still a working marker overall.
+    assert _has_working_marker(_AGENTS_RUNNING)
+    assert _has_working_marker("✽ Working… (30s)")
+
+
 def test_marker_rejects_pattern_quoted_in_prose():
     # A pane showing text *about* the spinner format (a conversation discussing this
     # very regex, say) must not read as working. The match is anchored to the start
