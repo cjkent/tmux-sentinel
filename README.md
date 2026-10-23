@@ -308,7 +308,9 @@ send Meta, which is the failure the fallback exists to survive.
 types a character instead of sending Esc, and Ctrl-Tab is bound to tab switching. Quit iTerm2 and
 run `bin/iterm2-keys.sh` from another terminal. It sets the left Option key to Esc+, removes the
 Ctrl-Tab binding, and backs the settings file up first. The right Option key is not changed, so it
-still composes characters. `--check` shows what would change and changes nothing. `C-Tab` also
+still composes characters. It also gives each profile Option-Left and Option-Right (move a word
+back or forward) and Cmd-Backspace (delete the line), which iTerm2's own "Natural Text Editing"
+preset provides; an existing binding on those keys is replaced and the old value is printed. `--check` shows what would change and changes nothing. `C-Tab` also
 needs tmux told to expect extended keys, which the script does not set:
 
 ```tmux

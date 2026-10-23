@@ -13,6 +13,15 @@
 # Only the LEFT Option key is changed. The right one keeps composing characters, which
 # on a UK or similar layout is how # and the like are typed.
 #
+# It also gives each profile three editing keys, which a shell or Claude Code prompt reads:
+#
+#   Option-Left / Option-Right   move back / forward a word   (sends Esc b / Esc f)
+#   Cmd-Backspace                delete the whole line        (sends Ctrl-U)
+#
+# These are iTerm2's own "Natural Text Editing" bindings, written the way its preset
+# writes them. An existing binding on one of these keys is replaced, and the old value is
+# printed so it can be put back.
+#
 # Run it from a terminal other than iTerm2, with iTerm2 quit. iTerm2 keeps its settings
 # in memory and rewrites the file when it quits, so an edit made while it runs is lost.
 #
@@ -88,6 +97,41 @@ pb_set_int() {   # path value : set, creating the key if the profile never store
 
 # --- the changes -------------------------------------------------------------------
 
+# iTerm2 action numbers in a key map entry: 10 sends an escape sequence (Esc then the
+# text), 11 sends hex bytes.
+ACT_ESCAPE=10
+ACT_HEX=11
+
+# Profile key maps are keyed "<keycode>-<modifiers>-0x0". Modifier bits: Option 0x80000,
+# Cmd 0x100000, and 0x200000 on arrow keys, which iTerm2 flags as keypad-like.
+KEY_OPT_LEFT="0xf702-0x280000-0x0"
+KEY_OPT_RIGHT="0xf703-0x280000-0x0"
+KEY_CMD_BACKSPACE="0x7f-0x100000-0x0"
+
+ensure_mapping() {   # profile-index label key action text
+    local idx="$1" label="$2" key="$3" action="$4" text="$5"
+    local map=":New\\ Bookmarks:$idx:Keyboard\\ Map" entry
+    entry="$map:$key"
+    local cur_action cur_text
+    cur_action="$(pb_get "$entry:Action")"
+    cur_text="$(pb_get "$entry:Text")"
+    [ "$cur_action" = "$action" ] && [ "$cur_text" = "$text" ] && return 0
+
+    if [ -n "$cur_action" ]; then
+        note "profile \"$PROFILE\": $label was action $cur_action \"$cur_text\" -> action $action \"$text\""
+    else
+        note "profile \"$PROFILE\": adding $label"
+    fi
+    [ "$CHECK" -eq 1 ] && return 0
+
+    prepare
+    "$PB" -c "Add $map dict" "$PLIST" >/dev/null 2>&1 || true   # absent in a fresh profile
+    "$PB" -c "Delete $entry" "$PLIST" >/dev/null 2>&1 || true
+    "$PB" -c "Add $entry dict" "$PLIST" >/dev/null 2>&1
+    "$PB" -c "Add $entry:Action integer $action" "$PLIST" >/dev/null 2>&1
+    "$PB" -c "Add $entry:Text string $text" "$PLIST" >/dev/null 2>&1
+}
+
 backup=""
 prepare() {
     [ -n "$backup" ] && return
@@ -123,6 +167,10 @@ while name="$(pb_get ":New\\ Bookmarks:$i:Name")" && [ -n "$name" ]; do
             pb_set_int ":New\\ Bookmarks:$i:Option\\ Key\\ Sends" 2
         fi
     fi
+    PROFILE="$name"
+    ensure_mapping "$i" "Option-Left (back a word)"     "$KEY_OPT_LEFT"      "$ACT_ESCAPE" "b"
+    ensure_mapping "$i" "Option-Right (forward a word)" "$KEY_OPT_RIGHT"     "$ACT_ESCAPE" "f"
+    ensure_mapping "$i" "Cmd-Backspace (delete line)"   "$KEY_CMD_BACKSPACE" "$ACT_HEX"    "0x15"
     i=$((i + 1))
 done
 
@@ -153,3 +201,4 @@ echo "$CHANGES change(s) applied. Reopen iTerm2, then check each key:"
 echo "  run  cat -v  and press the key, then Ctrl-C"
 echo "    M-Space should print   ^[ "
 echo "    C-Tab   should print   ^[[9;5u   (needs the tmux lines in the file header)"
+echo "    Option-Left should print   ^[b      Option-Right  ^[f      Cmd-Backspace  ^U"
