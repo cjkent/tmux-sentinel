@@ -64,6 +64,15 @@ class DaemonState:
         }
         event_name = _EVENT_ALIASES.get(event_name, event_name)
 
+        # A subagent runs in its parent's pane and fires the same hooks, tagged with an
+        # agent_id the main agent's events do not have. Its tool calls say nothing about
+        # the main agent's state, and acting on them did damage: a PreToolUse cleared the
+        # unseen flag the main agent's Stop had just set, so a finished orchestrator lost
+        # its dot to its own subagents; and each one overwrote the pane's cwd with the
+        # subagent's worktree path. Background agents are tracked from the screen instead.
+        if event.get("agent_id"):
+            return
+
         cwd = event.get("cwd", "")
         now = int(time.time())
         ps = self.ensure(pane_id)

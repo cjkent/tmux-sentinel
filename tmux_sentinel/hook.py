@@ -95,6 +95,13 @@ def handle_event(event: dict, pane_id: str, status_dir: Path = None) -> None:
 
     event_name = event.get("hook_event_name") or event.get("hookEventName") or "unknown"
     event_name = _EVENT_ALIASES.get(event_name, event_name)
+
+    # Events from a subagent carry an agent_id and arrive from the parent's pane; they
+    # describe the subagent, not the agent the pane is showing. See the daemon's
+    # apply_hook_event, which ignores them for the same reason.
+    if event.get("agent_id"):
+        return
+
     cwd = event.get("cwd", "")
     now = int(time.time())
 

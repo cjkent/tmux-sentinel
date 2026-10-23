@@ -201,6 +201,45 @@ def test_kiro_event_names():
     print("  ✓ test_kiro_event_names")
 
 
+def test_subagent_events_do_not_clear_unseen_or_overwrite_cwd():
+    # An orchestrator's Stop sets unseen. Its subagents then keep calling tools in the
+    # same pane, and each PreToolUse used to clear the flag and replace the cwd with the
+    # subagent's worktree path - so a finished orchestrator lost its dot.
+    state = DaemonState()
+    state.apply_hook_event({"hookEventName": "UserPromptSubmit", "cwd": "/proj"}, pane_id="100")
+    state.apply_hook_event({"hookEventName": "Stop", "cwd": "/proj"}, pane_id="100")
+    assert state.get("100").unseen is True
+    for name in ("PreToolUse", "PostToolUse", "UserPromptSubmit"):
+        state.apply_hook_event(
+            {"hookEventName": name, "cwd": "/proj/.claude/worktrees/agent-x",
+             "agent_id": "a1", "agent_type": "fork"},
+            pane_id="100",
+        )
+    ps = state.get("100")
+    assert ps.unseen is True
+    assert ps.status == IDLE
+    assert ps.cwd == "/proj"
+    print("  ✓ test_subagent_events_do_not_clear_unseen_or_overwrite_cwd")
+
+
+def test_subagent_event_alone_does_not_create_a_pane():
+    state = DaemonState()
+    state.apply_hook_event(
+        {"hookEventName": "PreToolUse", "cwd": "/x", "agent_id": "a1"}, pane_id="100"
+    )
+    assert state.get("100") is None
+    print("  ✓ test_subagent_event_alone_does_not_create_a_pane")
+
+
+def test_main_agent_events_without_agent_id_are_unchanged():
+    state = DaemonState()
+    state.apply_hook_event({"hookEventName": "Stop", "cwd": "/proj"}, pane_id="100")
+    state.apply_hook_event({"hookEventName": "PreToolUse", "cwd": "/proj"}, pane_id="100")
+    assert state.get("100").status == WORKING
+    assert state.get("100").unseen is False
+    print("  ✓ test_main_agent_events_without_agent_id_are_unchanged")
+
+
 if __name__ == "__main__":
     test_apply_agent_spawn()
     test_apply_user_prompt_submit()
@@ -214,4 +253,7 @@ if __name__ == "__main__":
     test_any_working()
     test_remove_pane()
     test_kiro_event_names()
+    test_subagent_events_do_not_clear_unseen_or_overwrite_cwd()
+    test_subagent_event_alone_does_not_create_a_pane()
+    test_main_agent_events_without_agent_id_are_unchanged()
     print("\nAll tests passed")

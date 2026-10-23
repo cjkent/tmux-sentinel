@@ -218,6 +218,29 @@ def test_git_branch_nonexistent_dir():
     assert _get_git_branch("") == ""
 
 
+# --- subagent events ---
+#
+# A subagent runs in its parent's pane and fires the same hooks, tagged with an agent_id
+# the main agent's events lack. They describe the subagent, not the pane's agent.
+
+def test_subagent_events_do_not_touch_the_file_state():
+    _setup()
+    _ev({"hook_event_name": "UserPromptSubmit", "cwd": "/proj"})
+    _ev({"hook_event_name": "Stop", "cwd": "/proj"})
+    assert is_unseen("42", status_dir=_test_dir)
+    before = _read()
+    _ev({"hook_event_name": "PreToolUse", "cwd": "/proj/.claude/worktrees/agent-x",
+         "agent_id": "a1", "agent_type": "fork"})
+    _ev({"hook_event_name": "PostToolUse", "cwd": "/proj/.claude/worktrees/agent-x",
+         "agent_id": "a1", "agent_type": "fork",
+         "tool_response": {"success": False}})
+    after = _read()
+    assert after.status == before.status == IDLE
+    assert after.cwd == before.cwd == "/proj"
+    assert is_unseen("42", status_dir=_test_dir)
+    assert not has_error_flag("42", status_dir=_test_dir)
+
+
 if __name__ == "__main__":
     for name, func in sorted(globals().items()):
         if name.startswith("test_") and callable(func):
