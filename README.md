@@ -304,6 +304,18 @@ the same tree with more in it, and `prefix w` still gives the window tree) and `
 (`refresh-client`). Keep the letters unmodified — `prefix M-u` would need the terminal to
 send Meta, which is the failure the fallback exists to survive.
 
+**iTerm2.** `M-Space` and `C-Tab` do not reach tmux with iTerm2's defaults. The left Option key
+types a character instead of sending Esc, and Ctrl-Tab is bound to tab switching. Quit iTerm2 and
+run `bin/iterm2-keys.sh` from another terminal. It sets the left Option key to Esc+, removes the
+Ctrl-Tab binding, and backs the settings file up first. The right Option key is not changed, so it
+still composes characters. `--check` shows what would change and changes nothing. `C-Tab` also
+needs tmux told to expect extended keys, which the script does not set:
+
+```tmux
+set -s extended-keys on
+set -as terminal-features 'xterm*:extkeys'
+```
+
 Display settings — column widths, preview size — live in `~/.tmux-sentinel/config.toml`
 instead, because the picker reads them per-invocation and shouldn't pay a `show-option`
 subprocess for each. See [Configuration](#configuration).
