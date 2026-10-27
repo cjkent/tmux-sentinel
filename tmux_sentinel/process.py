@@ -13,6 +13,11 @@ Claude Code matching: command line must contain '/claude' (path separator
 ensures we match the binary, not unrelated strings). Excludes the otelcol
 sidecar process.
 
+OpenCode matching: the program (argv[0], or the script after node/bun) must be named
+exactly 'opencode', and its first non-flag argument must not be a non-interactive
+subcommand ('serve', 'run', 'acp', ...). Written from the documentation, not from a
+running instance, so the process shape is unverified; see _opencode_interactive.
+
 Note: on macOS, the pane's shell process name persists as "kiro-cli-term"
 even after kiro exits. We don't rely on the shell name — we check for actual
 child processes in the tree.
@@ -50,13 +55,67 @@ def _get_process_tree() -> dict[str, tuple[str, str]]:
     return tree
 
 
+# Subcommands that do not run the interactive TUI. `opencode attach` is deliberately not
+# listed: it opens the TUI against a remote server. Taken from the CLI documentation.
+_OPENCODE_NON_INTERACTIVE = frozenset({
+    "run", "serve", "web", "acp", "auth", "models", "export", "import",
+    "upgrade", "uninstall", "stats", "github", "mcp", "agent", "session",
+})
+
+# A JS runtime in front of the script: `node /path/to/opencode`.
+_JS_RUNTIMES = frozenset({"node", "bun", "bunx", "deno"})
+
+
+def _basename(token: str) -> str:
+    return token.rsplit("/", 1)[-1]
+
+
+def _opencode_interactive(args: str) -> bool:
+    """True if this command line is the OpenCode TUI rather than any other opencode use.
+
+    Only argv[0] counts, or the script argument when argv[0] is a JS runtime. Matching
+    "opencode" anywhere in the line would also hit `vim ~/dev/opencode/README.md`, and
+    a project directory passed to opencode itself.
+
+    UNVERIFIED: written from the documentation. It assumes the TUI's argv[0] is, or ends
+    in, `opencode`, which holds for the install script, Homebrew and npm shims alike, but
+    the real `ps` output has not been seen.
+    """
+    tokens = args.split()
+    if not tokens:
+        return False
+    i = 0
+    if _basename(tokens[0]) in _JS_RUNTIMES:
+        # Skip the runtime's own flags to reach the script.
+        i = 1
+        while i < len(tokens) and tokens[i].startswith("-"):
+            i += 1
+    if i >= len(tokens) or _basename(tokens[i]) != "opencode":
+        return False
+    for token in tokens[i + 1:]:
+        if token.startswith("-"):
+            continue
+        return token not in _OPENCODE_NON_INTERACTIVE
+    return True   # bare `opencode`, or only flags
+
+
+def _agent_type_of(args: str) -> Optional[str]:
+    """Return "kiro", "claude" or "opencode" for an agent's command line, else None."""
+    # OpenCode first. Its test is strict (argv[0] only), while the Claude test is a loose
+    # substring match, so `opencode --model anthropic/claude-sonnet` would otherwise be
+    # taken for Claude Code on the strength of its model name.
+    if _opencode_interactive(args):
+        return "opencode"
+    if "kiro-cli" in args and "chat" in args:
+        return "kiro"
+    if "/claude" in args and "otelcol" not in args:
+        return "claude"
+    return None
+
+
 def _is_agent_process(args: str) -> bool:
     """Check if a command line belongs to an interactive AI agent."""
-    if "kiro-cli" in args and "chat" in args:
-        return True
-    if "/claude" in args and "otelcol" not in args:
-        return True
-    return False
+    return _agent_type_of(args) is not None
 
 
 def _has_agent_descendant(root_pid: str, tree: dict[str, tuple[str, str]]) -> bool:
@@ -89,7 +148,7 @@ def get_agent_panes(
     """
     Return the set of pane IDs that have an AI agent running as a descendant.
 
-    Detects both Kiro CLI (kiro-cli chat) and Claude Code (/path/to/claude).
+    Detects Kiro CLI (kiro-cli chat), Claude Code (/path/to/claude) and OpenCode.
 
     Args:
         pane_pids: {pane_id: pane_pid} mapping from tmux
@@ -120,11 +179,9 @@ def _agent_type_for(root_pid: str, tree: dict[str, tuple[str, str]]) -> Optional
         for child in children.get(current, []):
             entry = tree.get(child)
             if entry:
-                args = entry[1]
-                if "kiro-cli" in args and "chat" in args:
-                    return "kiro"
-                if "/claude" in args and "otelcol" not in args:
-                    return "claude"
+                agent_type = _agent_type_of(entry[1])
+                if agent_type:
+                    return agent_type
             queue.append(child)
     return None
 
@@ -136,7 +193,7 @@ def get_agent_types(
     """
     Return {pane_id: agent_type} for panes with an agent running.
 
-    agent_type is "kiro" or "claude".
+    agent_type is "kiro", "claude" or "opencode".
     """
     if process_tree is None:
         process_tree = _get_process_tree()

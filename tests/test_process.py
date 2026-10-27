@@ -135,6 +135,74 @@ def test_is_agent_process():
     assert _is_agent_process("vim") is False
 
 
+# --- OpenCode ---
+#
+# Written from the documentation, not from a running instance: these pin the matching
+# rules, not the real `ps` output.
+
+def test_opencode_tui_is_an_agent():
+    from tmux_sentinel.process import _agent_type_of
+    for args in (
+        "opencode",
+        "/Users/x/.opencode/bin/opencode",
+        "/opt/homebrew/bin/opencode -c",
+        "opencode /Users/x/dev/project",
+        "opencode attach http://localhost:4096",     # a TUI against a remote server
+        "node /usr/lib/node_modules/opencode-ai/bin/opencode",
+        "bun /x/.bin/opencode --model anthropic/claude",
+    ):
+        assert _agent_type_of(args) == "opencode", args
+
+
+def test_opencode_non_interactive_uses_are_not_agents():
+    from tmux_sentinel.process import _agent_type_of
+    for args in (
+        "opencode serve --port 4096",
+        "/opt/homebrew/bin/opencode run 'fix the bug'",
+        "opencode acp",
+        "opencode web",
+        "opencode models",
+        "opencode auth login",
+    ):
+        assert _agent_type_of(args) is None, args
+
+
+def test_opencode_is_not_matched_by_an_incidental_path():
+    # Only argv[0] counts. A path that merely contains the word must not.
+    from tmux_sentinel.process import _agent_type_of
+    for args in (
+        "vim /home/x/opencode/README.md",
+        "less /Users/x/dev/opencode",
+        "cd /Users/x/dev/opencode-notes",
+        "zsh",
+        "",
+    ):
+        assert _agent_type_of(args) is None, args
+
+
+def test_opencode_with_a_claude_model_is_not_taken_for_claude_code():
+    # The Claude test is a loose substring match on "/claude", which a model name such as
+    # anthropic/claude-sonnet contains.
+    from tmux_sentinel.process import _agent_type_of
+    assert _agent_type_of("opencode --model anthropic/claude-sonnet-4") == "opencode"
+    assert _agent_type_of("/opt/homebrew/bin/opencode -m anthropic/claude-opus") == "opencode"
+
+
+def test_existing_agents_are_still_recognised():
+    from tmux_sentinel.process import _agent_type_of
+    assert _agent_type_of("kiro-cli chat") == "kiro"
+    assert _agent_type_of("/usr/local/bin/claude --resume") == "claude"
+    assert _agent_type_of("/x/claude otelcol") is None
+
+
+def test_opencode_pane_is_found_and_typed():
+    from tmux_sentinel.process import get_agent_types
+    tree = _make_tree(("100", "1", "tmux"), ("200", "100", "zsh"),
+                      ("300", "200", "/Users/x/.opencode/bin/opencode"))
+    assert get_agent_panes({"p1": "200"}, process_tree=tree) == {"p1"}
+    assert get_agent_types({"p1": "200"}, process_tree=tree) == {"p1": "opencode"}
+
+
 if __name__ == "__main__":
     for name, func in list(globals().items()):
         if name.startswith("test_") and callable(func):

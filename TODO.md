@@ -44,7 +44,14 @@
   Costs: (1) doesn't replace existing code, it *adds* a third path — you'd still keep the direct-fallback Python path for when the daemon is down, so `picker.py`'s current logic doesn't go away; (2) couples the daemon to fzf's display format (`\x1f`-separated columns, ANSI coloring) — a UI-shaping concern currently isolated to `picker.py`/`formatting.py`, now living in the always-running process; (3) a daemon bug in rendering could now affect more than just the picker.
   Not worth doing unless popup latency becomes a real complaint again — we already went from ~290ms to ~110ms this session, and this buys further ms at real architectural cost. Revisit if it does.
 
-- **OpenCode support** — Process detection is trivial (~10 min: add a pattern to `process.py` and an icon to `_AGENT_ICONS`). The real unknown is whether OpenCode exposes lifecycle hooks: if it does, ~1-2hr to wire an event mapping like the Kiro/Claude aliases in `hook.py`; if not, it's scrape-only via a new `manifests/opencode.toml`, ~half a day and less reliable (no `Stop` event means no bell, no unseen flag, and status inferred entirely from the screen). Deferred — settle the hooks question first.
+- **Verify OpenCode support on a real install** — Built from the documentation, with no OpenCode to run it against. The mapping logic and the sub-session filter are tested under Node with a stand-in for OpenCode's context, which proves our side only. What a real run needs to settle, in order of consequence:
+  1. **Process shape.** `ps` output for the TUI. The matcher assumes argv[0] (or the script after node/bun) is exactly `opencode` and that `serve`, `run`, `acp` and friends are the non-interactive subcommands (`_opencode_interactive` in `process.py`). If the pane shows `[---]`, this is why.
+  2. **Event payloads.** Run with `TMUX_SENTINEL_OPENCODE_DEBUG=1` and read `~/.tmux-sentinel/opencode-events.log`. The plugin assumes `properties.sessionID` (or `properties.info.id`), `properties.status.type` of `busy`/`idle`, and `properties.info.parentID` on `session.created`/`session.updated`. A wrong guess fails towards reporting, so the symptom would be a sub-agent's activity showing as the main session's.
+  3. **Bun shell.** The plugin pipes JSON to the hook with `` $`...` < ${Buffer} `` and `.env()`, `.quiet()`, `.nothrow()`, `.text()`. All are documented for Bun's shell, but not exercised here.
+  4. **The bell.** The hook prints one; the plugin captures it and writes it to its own stdout. Whether that reaches the terminal from inside OpenCode is unknown.
+  5. **Does `session.idle` fire once per turn?** The plugin sends `stop` for each. A duplicate would be harmless, but an error followed by an idle needs to end as `[ERR]`.
+  6. **A screen manifest** (`manifests/opencode.toml`). Without one the poll cannot correct a missed event, so a lost `session.idle` leaves the pane on `working`. Needs the footer and approval-prompt text.
+  7. **Permission events.** Whether `permission.asked` and `permission.replied` are what current releases emit; the plugin also accepts the older `permission.updated`.
 
 ## TODOs
 

@@ -240,6 +240,21 @@ def test_main_agent_events_without_agent_id_are_unchanged():
     print("  ✓ test_main_agent_events_without_agent_id_are_unchanged")
 
 
+def test_permission_request_and_reply():
+    # Reported as events by OpenCode; Claude Code and Kiro show the prompt on screen.
+    state = DaemonState()
+    state.apply_hook_event({"hook_event_name": "userPromptSubmit", "cwd": "/p"}, pane_id="100")
+    started = state.get("100").timestamp
+    state.apply_hook_event({"hook_event_name": "permissionRequest", "cwd": "/p"}, pane_id="100")
+    ps = state.get("100")
+    assert ps.status == WAITING and ps.unseen is True
+    state.apply_hook_event({"hook_event_name": "permissionReplied", "cwd": "/p"}, pane_id="100")
+    ps = state.get("100")
+    assert ps.status == WORKING and ps.unseen is False
+    assert ps.timestamp == started
+    print("  ✓ test_permission_request_and_reply")
+
+
 if __name__ == "__main__":
     test_apply_agent_spawn()
     test_apply_user_prompt_submit()
@@ -253,6 +268,7 @@ if __name__ == "__main__":
     test_any_working()
     test_remove_pane()
     test_kiro_event_names()
+    test_permission_request_and_reply()
     test_subagent_events_do_not_clear_unseen_or_overwrite_cwd()
     test_subagent_event_alone_does_not_create_a_pane()
     test_main_agent_events_without_agent_id_are_unchanged()

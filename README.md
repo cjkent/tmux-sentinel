@@ -1,6 +1,6 @@
 # tmux-sentinel
 
-A tmux-native tool for monitoring and switching between multiple AI agent sessions. It tracks agent status via lifecycle hooks (Kiro CLI and Claude Code) and surfaces that information through a window picker, status bar, and bell notifications.
+A tmux-native tool for monitoring and switching between multiple AI agent sessions. It tracks agent status via lifecycle hooks (Kiro CLI, Claude Code and OpenCode) and surfaces that information through a window picker, status bar, and bell notifications.
 
 Entirely vibe-coded using Claude Code. I haven't looked at the code and neither should you. Use at your own risk. Works on my machine ;)
 
@@ -44,6 +44,44 @@ The final status on `stop` is determined by:
 1. Last non-empty line of the response ends with `?` → **waiting** (Kiro CLI only; Claude Code doesn't provide response text)
 2. Any tool failed during the turn → **error**
 3. Otherwise → **idle**
+
+### OpenCode
+
+OpenCode has no hook list to edit. It loads plugin files from `~/.config/opencode/plugins/`, so
+`setup.sh` writes one file there (`integrations/opencode/tmux-sentinel.js`, with this checkout's
+path filled in) and removes it with `--remove-hooks`. It only ever replaces or deletes a file that
+carries its own marker line. Restart OpenCode after installing.
+
+The plugin turns OpenCode's events into the events the other agents send:
+
+| OpenCode event | Sent as | Effect |
+|---|---|---|
+| `session.created` | `agentSpawn` | idle |
+| `session.status` becoming `busy` | `userPromptSubmit` | working, starts the clock |
+| `tool.execute.before` | `preToolUse` | stays working |
+| `permission.asked` | `permissionRequest` | waiting, unseen, bell |
+| `permission.replied` | `permissionReplied` | working again |
+| `session.idle` | `stop` | idle, unseen, bell |
+| `session.error` | `postToolUse` (failed) | error flag; shown when the session goes idle |
+
+A sub-agent runs as a child session in the same pane and fires the same events. The plugin learns
+which sessions have a parent and ignores everything they do, as the hook ignores Claude Code events
+that carry an `agent_id`.
+
+**Written from the documentation, not from a running OpenCode.** The event names are documented;
+the fields inside them are not, so the plugin reads them defensively and treats an unknown session
+as the main one. Process detection and the unverified points are listed in `TODO.md`. To see what
+OpenCode really sends:
+
+```
+TMUX_SENTINEL_OPENCODE_DEBUG=1 opencode
+cat ~/.tmux-sentinel/opencode-events.log
+```
+
+The log holds event types and the names of their fields, never message content.
+
+There is no screen-scrape manifest for OpenCode yet, so the poll cannot correct a pane whose event
+was missed. It needs the real UI text.
 
 ### Status Files
 
@@ -343,9 +381,9 @@ tmux-sentinel/
 │   ├── process.py             # Agent process detection via ps tree walk
 │   ├── tmux.py                # Tmux command wrappers
 │   ├── formatting.py          # Column alignment, ANSI colors, elapsed time
-│   ├── hook.py                # Hook entry point (Kiro CLI + Claude Code)
+│   ├── hook.py                # Hook entry point (Kiro CLI, Claude Code, OpenCode events)
 │   ├── config.py              # Optional user settings (config.toml)
-│   ├── install.py             # Hook add/remove in agent JSON configs
+│   ├── install.py             # Hook add/remove: agent JSON configs, OpenCode plugin file
 │   └── picker.py              # fzf window picker entry point
 ├── tmux_sentinel_daemon/      # Long-running state daemon
 │   ├── daemon.py              # Socket server + poll loop
@@ -358,14 +396,19 @@ tmux-sentinel/
 ├── manifests/                 # Screen-scrape patterns, one file per agent
 │   ├── claude.toml
 │   └── kiro.toml
+├── integrations/
+│   └── opencode/
+│       └── tmux-sentinel.js   # OpenCode plugin template, installed by setup.sh
 ├── sentinel.tmux              # Plugin entry point (TPM/tpack); tmux-side config
 ├── setup.sh                   # Agent-hook installer (interactive)
 ├── config.toml.example        # Annotated default settings
 ├── bin/
 │   ├── status_client.sh       # status-right client (lazy-starts the daemon)
 │   ├── edit-config.sh         # Opens config.toml in $EDITOR
+│   ├── lru_bump.sh            # Records a visit, for recent mode
+│   └── iterm2-keys.sh         # Sets up iTerm2 so M-Space and C-Tab reach tmux
 └── tests/
-    ├── test_*.py              # Python tests (186)
+    ├── test_*.py              # Python tests (290); the OpenCode plugin ones need node
     └── test-*.sh              # Bash tests (picker + setup)
 ```
 

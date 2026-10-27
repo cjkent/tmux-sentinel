@@ -106,6 +106,21 @@ class DaemonState:
             if tool_response.get("success") is False:
                 ps.has_error = True
 
+        elif event_name == "permissionRequest":
+            # Blocked on an approval prompt, reported as an event (OpenCode). Claude Code
+            # and Kiro show it on screen instead, which the poll's scrape picks up.
+            ps.status = WAITING
+            if cwd:
+                ps.cwd = cwd
+            ps.unseen = True
+
+        elif event_name == "permissionReplied":
+            # Answered, so the agent carries on. Keep the turn's start time.
+            ps.status = WORKING
+            if cwd:
+                ps.cwd = cwd
+            ps.unseen = False
+
         elif event_name == "stop":
             import re
             response = event.get("assistant_response", "")

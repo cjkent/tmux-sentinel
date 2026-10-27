@@ -241,6 +241,27 @@ def test_subagent_events_do_not_touch_the_file_state():
     assert not has_error_flag("42", status_dir=_test_dir)
 
 
+# --- permission events (reported by OpenCode as events) ---
+
+def test_permission_request_marks_waiting_unseen():
+    _setup()
+    _ev({"hook_event_name": "userPromptSubmit", "cwd": "/proj"})
+    _ev({"hook_event_name": "permissionRequest", "cwd": "/proj"})
+    assert _read().status == WAITING
+    assert is_unseen("42", status_dir=_test_dir)
+
+
+def test_permission_replied_resumes_work_and_keeps_the_start_time():
+    _setup()
+    _ev({"hook_event_name": "userPromptSubmit", "cwd": "/proj"})
+    started = _read().timestamp
+    _ev({"hook_event_name": "permissionRequest", "cwd": "/proj"})
+    _ev({"hook_event_name": "permissionReplied", "cwd": "/proj"})
+    after = _read()
+    assert after.status == WORKING
+    assert after.timestamp == started
+
+
 if __name__ == "__main__":
     for name, func in sorted(globals().items()):
         if name.startswith("test_") and callable(func):

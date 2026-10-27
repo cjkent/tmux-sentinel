@@ -20,6 +20,11 @@ The two agents use different shapes for the same idea:
       {"hooks": {"SessionStart": [{"matcher": "", "hooks": [
           {"type": "command", "command": "..."}]}]}}
 
+OpenCode has no hook list to edit. It loads plugin files from a directory, so installing
+means writing one file (integrations/opencode/tmux-sentinel.js, with the repo path
+filled in) and removing means deleting it. The file carries a marker line so that only
+a file we wrote is ever replaced or deleted.
+
 Every operation is idempotent: adding twice leaves one hook, removing when absent is a
 no-op. Files are written atomically (temp file + rename) so an interrupted run cannot
 leave a user with a truncated agent config.
@@ -30,6 +35,8 @@ Usage:
     python3 -m tmux_sentinel.install --remove-kiro <file>...
     python3 -m tmux_sentinel.install --add-claude --command CMD
     python3 -m tmux_sentinel.install --remove-claude
+    python3 -m tmux_sentinel.install --add-opencode --repo-dir DIR
+    python3 -m tmux_sentinel.install --remove-opencode
 """
 from __future__ import annotations
 
@@ -46,6 +53,20 @@ CLAUDE_EVENTS = ["SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse"
 
 CLAUDE_SETTINGS = Path.home() / ".claude" / "settings.json"
 KIRO_AGENTS_DIR = Path.home() / ".kiro" / "agents"
+
+OPENCODE_PLUGIN_NAME = "tmux-sentinel.js"
+# Written on the template's first line and checked before replacing or deleting, so a
+# file of the same name that the user wrote is never touched.
+OPENCODE_MARKER = "MANAGED-BY-TMUX-SENTINEL"
+OPENCODE_TEMPLATE = (
+    Path(__file__).resolve().parent.parent / "integrations" / "opencode" / "tmux-sentinel.js"
+)
+
+
+def opencode_plugin_dir() -> Path:
+    """OpenCode's global plugin directory. Honours XDG_CONFIG_HOME, as OpenCode does."""
+    base = os.environ.get("XDG_CONFIG_HOME") or str(Path.home() / ".config")
+    return Path(base) / "opencode" / "plugins"
 
 # Recognises our own hook however it's invoked, so we don't add a second copy or miss
 # one on removal. Matches the current Python entry point and the old bash hook that
@@ -211,6 +232,68 @@ def claude_remove(data: dict) -> dict:
 
 # --- CLI ---------------------------------------------------------------------------
 
+# --- OpenCode: one plugin file ------------------------------------------------------
+
+def opencode_render(repo_dir: str) -> str:
+    """The plugin source with this checkout's path filled in."""
+    text = OPENCODE_TEMPLATE.read_text()
+    if "@REPO_DIR@" not in text:
+        raise ValueError(f"{OPENCODE_TEMPLATE}: no @REPO_DIR@ placeholder")
+    # json.dumps gives a correctly escaped JS string literal; strip its quotes because
+    # the template already supplies them.
+    return text.replace("@REPO_DIR@", json.dumps(repo_dir)[1:-1])
+
+
+def _is_our_plugin(path: Path) -> bool:
+    try:
+        return OPENCODE_MARKER in path.read_text()
+    except (OSError, UnicodeDecodeError):
+        return False
+
+
+def opencode_has_plugin() -> bool:
+    return _is_our_plugin(opencode_plugin_dir() / OPENCODE_PLUGIN_NAME)
+
+
+def opencode_add(repo_dir: str) -> str:
+    """Write the plugin file. Returns "added", "updated" or "unchanged".
+
+    Refuses to overwrite a file we did not write.
+    """
+    target = opencode_plugin_dir() / OPENCODE_PLUGIN_NAME
+    rendered = opencode_render(repo_dir)
+    if target.exists():
+        if not _is_our_plugin(target):
+            raise ValueError(f"{target} exists and is not ours; not overwriting")
+        if target.read_text() == rendered:
+            return "unchanged"
+        status = "updated"
+    else:
+        status = "added"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=str(target.parent), prefix=target.name, suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(rendered)
+        os.replace(tmp, target)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+    return status
+
+
+def opencode_remove() -> bool:
+    """Delete our plugin file. True if one was removed; a file that is not ours stays."""
+    target = opencode_plugin_dir() / OPENCODE_PLUGIN_NAME
+    if not _is_our_plugin(target):
+        return False
+    target.unlink()
+    return True
+
+
 def _list_kiro_agents(hooked: bool) -> list[Path]:
     """Kiro agent configs, filtered by whether they already carry our hook.
 
@@ -246,7 +329,31 @@ def main(argv: list[str] = None) -> int:
     p.add_argument("--remove-claude", action="store_true")
     p.add_argument("--claude-has-hook", action="store_true",
                    help="exit 0 if Claude settings already have our hook, else 1")
+    p.add_argument("--add-opencode", action="store_true",
+                   help="install the OpenCode plugin file")
+    p.add_argument("--remove-opencode", action="store_true",
+                   help="remove the OpenCode plugin file, if it is ours")
+    p.add_argument("--opencode-has-plugin", action="store_true",
+                   help="exit 0 if our OpenCode plugin is installed, else 1")
+    p.add_argument("--repo-dir", help="the tmux-sentinel checkout, for --add-opencode")
     args = p.parse_args(argv)
+
+    if args.opencode_has_plugin:
+        return 0 if opencode_has_plugin() else 1
+
+    if args.add_opencode:
+        if not args.repo_dir:
+            p.error("--add-opencode requires --repo-dir")
+        try:
+            print(opencode_add(args.repo_dir))
+        except (ValueError, OSError) as e:
+            print(f"cannot install the OpenCode plugin: {e}", file=sys.stderr)
+            return 1
+        return 0
+
+    if args.remove_opencode:
+        print("removed" if opencode_remove() else "absent")
+        return 0
 
     if args.list_kiro_eligible:
         for path in _list_kiro_agents(hooked=False):

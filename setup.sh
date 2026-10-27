@@ -140,6 +140,17 @@ if [ "${1:-}" = "--remove-hooks" ]; then
                 || error "Could not update $CLAUDE_SETTINGS"
         fi
     fi
+
+    # And the OpenCode plugin file, if we installed one.
+    if eval "$INSTALL --opencode-has-plugin"; then
+        echo -n "  Also remove the OpenCode plugin? [Y/n] "
+        read -r answer
+        if [ "${answer:-Y}" != "n" ] && [ "${answer:-Y}" != "N" ]; then
+            eval "$INSTALL --remove-opencode" >/dev/null \
+                && info "Removed the OpenCode plugin" \
+                || error "Could not remove the OpenCode plugin"
+        fi
+    fi
     exit 0
 fi
 
@@ -283,6 +294,38 @@ else
             info "Claude Code hooks configured in $CLAUDE_SETTINGS"
         else
             error "Could not update $CLAUDE_SETTINGS"
+        fi
+    fi
+fi
+
+# 5. Configure OpenCode
+#
+# OpenCode has no hook list to edit: it loads plugin files from a directory, so this
+# installs one file. Offered only if OpenCode looks present, since writing into the
+# config of a tool that is not installed would just leave a stray directory.
+OPENCODE_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/opencode"
+if command -v opencode >/dev/null 2>&1 || [ -d "$OPENCODE_DIR" ]; then
+    step "Configuring OpenCode..."
+    if eval "$INSTALL --opencode-has-plugin"; then
+        # Re-run to refresh the file: it embeds this checkout's path, which goes stale if
+        # the checkout is moved. Idempotent, so an unchanged file is left alone.
+        RESULT=$(eval "$INSTALL --add-opencode --repo-dir $(printf '%q' "$REPO_DIR")" 2>&1) \
+            || RESULT="failed"
+        case "$RESULT" in
+            unchanged) info "OpenCode plugin already configured" ;;
+            updated)   info "OpenCode plugin refreshed" ;;
+            *)         error "Could not update the OpenCode plugin: $RESULT" ;;
+        esac
+    else
+        echo -n "  Add the tmux-sentinel plugin to OpenCode? [Y/n] "
+        read -r answer
+        if [ "${answer:-Y}" != "n" ] && [ "${answer:-Y}" != "N" ]; then
+            if RESULT=$(eval "$INSTALL --add-opencode --repo-dir $(printf '%q' "$REPO_DIR")" 2>&1); then
+                info "OpenCode plugin installed in $OPENCODE_DIR/plugins"
+                info "Restart OpenCode to load it"
+            else
+                error "$RESULT"
+            fi
         fi
     fi
 fi

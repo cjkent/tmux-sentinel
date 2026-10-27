@@ -267,6 +267,103 @@ def test_list_kiro_agents_missing_dir_is_empty():
         inst.KIRO_AGENTS_DIR = orig
 
 
+# --- OpenCode: one plugin file, not a hook list -----------------------------------
+
+def _opencode_env():
+    """Point XDG_CONFIG_HOME at a scratch dir; returns (dir, restore)."""
+    import os
+    tmp = tempfile.mkdtemp()
+    old = os.environ.get("XDG_CONFIG_HOME")
+    os.environ["XDG_CONFIG_HOME"] = tmp
+
+    def restore():
+        if old is None:
+            os.environ.pop("XDG_CONFIG_HOME", None)
+        else:
+            os.environ["XDG_CONFIG_HOME"] = old
+    return Path(tmp), restore
+
+
+def test_opencode_add_writes_the_plugin_with_the_repo_path():
+    from tmux_sentinel.install import opencode_add, opencode_has_plugin
+    tmp, restore = _opencode_env()
+    try:
+        assert not opencode_has_plugin()
+        assert opencode_add("/some/repo") == "added"
+        target = tmp / "opencode" / "plugins" / "tmux-sentinel.js"
+        assert target.exists()
+        assert 'const REPO = "/some/repo"' in target.read_text()
+        assert "@REPO_DIR@" not in target.read_text()
+        assert opencode_has_plugin()
+    finally:
+        restore()
+
+
+def test_opencode_add_is_idempotent_and_refreshes_a_stale_path():
+    from tmux_sentinel.install import opencode_add
+    tmp, restore = _opencode_env()
+    try:
+        assert opencode_add("/old/repo") == "added"
+        assert opencode_add("/old/repo") == "unchanged"
+        assert opencode_add("/new/repo") == "updated"
+        text = (tmp / "opencode" / "plugins" / "tmux-sentinel.js").read_text()
+        assert "/new/repo" in text and "/old/repo" not in text
+    finally:
+        restore()
+
+
+def test_opencode_path_with_quotes_stays_a_valid_js_string():
+    from tmux_sentinel.install import opencode_add
+    tmp, restore = _opencode_env()
+    try:
+        opencode_add('/odd "dir"\\x')
+        text = (tmp / "opencode" / "plugins" / "tmux-sentinel.js").read_text()
+        assert 'const REPO = "/odd \\"dir\\"\\\\x"' in text
+    finally:
+        restore()
+
+
+def test_opencode_never_overwrites_or_deletes_a_file_that_is_not_ours():
+    from tmux_sentinel.install import opencode_add, opencode_remove
+    tmp, restore = _opencode_env()
+    try:
+        d = tmp / "opencode" / "plugins"
+        d.mkdir(parents=True)
+        mine = d / "tmux-sentinel.js"
+        mine.write_text("// the user's own plugin\n")
+        try:
+            opencode_add("/repo")
+            raise AssertionError("expected a refusal")
+        except ValueError:
+            pass
+        assert opencode_remove() is False
+        assert mine.read_text() == "// the user's own plugin\n"
+    finally:
+        restore()
+
+
+def test_opencode_remove_deletes_our_file_and_is_idempotent():
+    from tmux_sentinel.install import opencode_add, opencode_remove, opencode_has_plugin
+    tmp, restore = _opencode_env()
+    try:
+        assert opencode_remove() is False          # nothing there
+        opencode_add("/repo")
+        assert opencode_remove() is True
+        assert not opencode_has_plugin()
+        assert opencode_remove() is False
+    finally:
+        restore()
+
+
+def test_opencode_plugin_dir_honours_xdg_config_home():
+    from tmux_sentinel.install import opencode_plugin_dir
+    tmp, restore = _opencode_env()
+    try:
+        assert opencode_plugin_dir() == tmp / "opencode" / "plugins"
+    finally:
+        restore()
+
+
 if __name__ == "__main__":
     for name, func in sorted(globals().items()):
         if name.startswith("test_") and callable(func):

@@ -50,7 +50,7 @@ from tmux_sentinel.formatting import (
 from tmux_sentinel.config import get_int, get_str
 
 
-_AGENT_ICONS = {"kiro": "👻", "claude": "🟠"}
+_AGENT_ICONS = {"kiro": "👻", "claude": "🟠", "opencode": "🟦"}
 
 # Column caps, all overridable from ~/.tmux-sentinel/config.toml. Names are the
 # free-text column, so they get the tightest default: Claude's live task titles

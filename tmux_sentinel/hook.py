@@ -138,6 +138,37 @@ def handle_event(event: dict, pane_id: str, status_dir: Path = None) -> None:
         if tool_response.get("success") is False:
             set_error_flag(pane_id, status_dir=sd)
 
+    elif event_name == "permissionRequest":
+        # The agent is blocked on an approval prompt. Sent by agents that report it as an
+        # event (OpenCode); Claude Code and Kiro show the prompt on screen instead, and
+        # the daemon's screen scrape finds it there. Needs a human, so it is unseen and
+        # rings the bell, as a finished turn does.
+        existing = read_status(pane_id, status_dir=sd)
+        write_status(
+            pane_id,
+            WAITING,
+            cwd or (existing.cwd if existing else ""),
+            existing.git_branch if existing else _get_git_branch(cwd),
+            now,
+            status_dir=sd,
+        )
+        set_unseen(pane_id, status_dir=sd)
+        sys.stdout.write("\a")
+        sys.stdout.flush()
+
+    elif event_name == "permissionReplied":
+        # The prompt was answered, so the agent carries on. The turn's start time is kept.
+        existing = read_status(pane_id, status_dir=sd)
+        if existing:
+            write_status(
+                pane_id,
+                WORKING,
+                cwd or existing.cwd,
+                existing.git_branch,
+                existing.timestamp,
+                status_dir=sd,
+            )
+
     elif event_name == "stop":
         # Agent turn complete — determine final status:
         #   1. Response ends with ? → waiting (agent asking a question)
