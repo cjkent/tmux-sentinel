@@ -86,7 +86,7 @@ Claude Code's plan confirmation prompt ("Would you like to proceed?" with `shift
 
 **Hook configuration:**
 - Kiro CLI: hooks are injected into `~/.kiro/agents/*.json`
-- Claude Code: hooks are injected into `~/.claude/settings.json` (both old hook.py and daemon hook_client)
+- Claude Code: hooks are injected into `~/.claude/settings.json` (only `tmux_sentinel/hook.py`; `setup.sh` does not install the daemon `hook_client` for Claude Code, and `hook.py` does not forward to the daemon. Only the OpenCode plugin runs both)
 
 ## Testing
 

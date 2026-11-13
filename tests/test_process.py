@@ -195,6 +195,22 @@ def test_existing_agents_are_still_recognised():
     assert _agent_type_of("/x/claude otelcol") is None
 
 
+def test_bare_claude_command_is_recognised():
+    # `claude` on PATH has no slash, so it is matched by the basename of argv[0].
+    from tmux_sentinel.process import _agent_type_of
+    assert _agent_type_of("claude") == "claude"
+    assert _agent_type_of("claude -r") == "claude"
+    assert _agent_type_of("/usr/local/bin/claude") == "claude"
+
+
+def test_claude_name_lookalikes_are_not_recognised():
+    from tmux_sentinel.process import _agent_type_of
+    assert _agent_type_of("claude-foo") is None
+    assert _agent_type_of("vim claude.md") is None
+    assert _agent_type_of("/usr/bin/otelcol-contrib --config /x/claude/y") is None
+    assert _agent_type_of("claude-foo otelcol") is None
+
+
 def test_opencode_pane_is_found_and_typed():
     from tmux_sentinel.process import get_agent_types
     tree = _make_tree(("100", "1", "tmux"), ("200", "100", "zsh"),

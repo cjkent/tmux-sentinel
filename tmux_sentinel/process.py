@@ -10,7 +10,8 @@ This distinguishes interactive agents from non-interactive uses like
 'kiro-cli acp' (background workers).
 
 Claude Code matching: command line must contain '/claude' (path separator
-ensures we match the binary, not unrelated strings). Excludes the otelcol
+ensures we match the binary, not unrelated strings), or argv[0] must be
+exactly 'claude' (bare command). Excludes the otelcol
 sidecar process.
 
 OpenCode matching: the program (argv[0], or the script after node/bun) must be named
@@ -108,7 +109,11 @@ def _agent_type_of(args: str) -> Optional[str]:
         return "opencode"
     if "kiro-cli" in args and "chat" in args:
         return "kiro"
-    if "/claude" in args and "otelcol" not in args:
+    # A bare `claude` (found on PATH) has no slash, so it is matched by the program name.
+    # The name check is exact: `claude-foo` and `vim claude.md` do not match.
+    tokens = args.split()
+    program_is_claude = bool(tokens) and _basename(tokens[0]) == "claude"
+    if ("/claude" in args or program_is_claude) and "otelcol" not in args:
         return "claude"
     return None
 
