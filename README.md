@@ -278,7 +278,7 @@ Kiro and Claude Code are both optional — setup skips whichever you don't have.
 2. Offers an fzf multi-select of your Kiro agent configs (`~/.kiro/agents/*.json`), everything pre-selected — Enter accepts all, Tab deselects, Esc skips
 3. Backs up the selected configs and injects hooks for all 5 lifecycle events, replacing the old bash hook if an earlier version installed it
 4. Offers to do the same for Claude Code (`~/.claude/settings.json`), creating the file if absent and leaving hooks of your own untouched
-5. Offers to add the `sentinel.tmux` line to `~/.tmux.conf`, and to add the status-bar placeholder
+5. Offers to add the `sentinel.tmux` line to `~/.tmux.conf`, and (with confirmation) `set -g status-interval 5` and the `#{sentinel_status}` placeholder for `status-right` — see [Status bar](#status-bar)
 
 To remove the agent hooks again:
 
@@ -370,7 +370,15 @@ set -g status-right '#{sentinel_status} %H:%M'
 ```
 
 With no placeholder, nothing is touched and no summary appears. `setup.sh` offers to
-append one for you.
+add `set -g status-interval 5` and the placeholder to `~/.tmux.conf`, asking first. If you
+already have a `status-right`, it is kept and the placeholder is appended to it; move it
+wherever you like afterwards.
+
+Load order matters: `sentinel.tmux` substitutes the placeholder when it loads, so
+`status-right` must be set before it. Without a plugin manager, put the
+`run-shell .../sentinel.tmux` line after your `status-right` line — `setup.sh` moves it to
+the end if it finds it earlier (it asks first). With TPM or tpack, put `status-right` above the
+`run '...tpm'` line.
 
 ## File Structure
 

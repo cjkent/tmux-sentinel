@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # tmux-sentinel setup
 #
-# Configures tmux and Kiro CLI for agent status tracking. Does three things:
+# Configures agent status tracking and the tmux wiring for it. Does four things:
 #   1. Injects hook entries into Kiro agent JSON configs (all 5 lifecycle events)
-#   2. Configures tmux options (bell monitoring, status bar, keybinding)
+#   2. Offers hooks for Claude Code and the plugin for OpenCode
 #   3. Creates the status directory (~/.tmux-sentinel/status/)
+#   4. Offers to add the sentinel.tmux line and a status-bar placeholder to ~/.tmux.conf
 #
 # Hooks are additive — existing hooks in agent configs are preserved.
 # The injection is idempotent — running setup again won't duplicate hooks.
@@ -336,33 +337,116 @@ fi
 # hooks, the status bar — because it has to be re-runnable on every tmux start for the
 # plugin case, and duplicating that logic in two places would guarantee they drift.
 #
-# What's left for this script is the part a plugin must not do: writing hooks into other
-# tools' config files, which is why it stays an explicit opt-in step.
+# What's left for this script is the part a plugin must not do: writing into other
+# tools' config files (agent hooks, and ~/.tmux.conf below), which is why each stays an
+# explicit opt-in step.
 step "Wiring up tmux..."
 
 TMUX_CONF="$HOME/.tmux.conf"
 PLUGIN_LINE="run-shell $REPO_DIR/sentinel.tmux"
 MARKER="# tmux-sentinel"
+CONF_BACKED_UP=0
 
+# Patterns for uncommented lines, so a commented-out example never counts as set up.
+RUN_RE='^[[:space:]]*run(-shell)?[[:space:]].*sentinel\.tmux'
+TPM_RUN_RE='^[[:space:]]*run(-shell)?[[:space:]].*(tpm|tpack)'
+INTERVAL_RE='^[[:space:]]*set(-option)?[[:space:]].*status-interval([[:space:]"]|$)'
+RIGHT_RE='^[[:space:]]*set(-option)?[[:space:]].*status-right([[:space:]"]|$)'
+STATUS_RE="$INTERVAL_RE|$RIGHT_RE|^[[:space:]]*[^#[:space:]].*sentinel_status"
+
+# True if $TMUX_CONF has a line matching the ERE $1. A missing file does not match.
+conf_has() { grep -qE "$1" "$TMUX_CONF" 2>/dev/null; }
+
+# Line number of the first (head) or last (tail) line matching the ERE $1, or nothing.
+conf_line() { grep -nE "$1" "$TMUX_CONF" 2>/dev/null | "$2" -1 | cut -d: -f1 || true; }
+
+# Backs up $TMUX_CONF once per run, before the first change. Nothing to back up if absent.
+backup_conf() {
+    if [ "$CONF_BACKED_UP" = 0 ] && [ -f "$TMUX_CONF" ]; then
+        cp "$TMUX_CONF" "$TMUX_CONF.backup.$(date +%Y%m%d%H%M%S)"
+    fi
+    CONF_BACKED_UP=1
+}
+
+# Replaces $TMUX_CONF with the file $1 and removes it. cat rather than mv, so the conf
+# keeps its own file mode instead of mktemp's 0600.
+replace_conf() { cat "$1" > "$TMUX_CONF"; rm -f "$1"; }
+
+# Yes/no question defaulting to yes. End of input counts as no.
+ask_yes() {
+    local answer
+    echo -n "$1"
+    read -r answer || answer=n
+    [ "${answer:-Y}" != "n" ] && [ "${answer:-Y}" != "N" ]
+}
+
+IS_TPM=0
 if grep -qF "@plugin 'cjkent/tmux-sentinel'" "$TMUX_CONF" 2>/dev/null \
    || grep -qF '@plugin "cjkent/tmux-sentinel"' "$TMUX_CONF" 2>/dev/null; then
+    IS_TPM=1
+fi
+
+# status-right: offered, never imposed. sentinel.tmux only substitutes a #{sentinel_status}
+# placeholder on load, so without one the status bar shows nothing, which looks like a
+# broken install. An existing status-right is kept, and our segment is appended to it.
+if conf_has 'sentinel_status|status_client\.sh'; then
+    info "status bar already shows the agent summary"
+elif ask_yes "  Add status-interval 5 and a #{sentinel_status} placeholder to status-right in ~/.tmux.conf? [Y/n] "; then
+    if conf_has "$RIGHT_RE"; then
+        RIGHT_NEW='set -ga status-right " #{sentinel_status}"'
+        warn "Your existing status-right was kept — #{sentinel_status} is appended to it"
+    else
+        RIGHT_NEW='set -g status-right "#{sentinel_status} %H:%M"'
+    fi
+    BLOCK=$(mktemp)
+    {
+        if ! grep -qF "$MARKER" "$TMUX_CONF" 2>/dev/null; then
+            echo ""
+            echo "$MARKER: agent summary in the status bar. sentinel.tmux fills in #{sentinel_status} on load."
+        fi
+        conf_has "$INTERVAL_RE" || echo "set -g status-interval 5"
+        echo "$RIGHT_NEW"
+    } > "$BLOCK"
+
+    backup_conf
+    TPM_LINE=$(conf_line "$TPM_RUN_RE" head)
+    if [ "$IS_TPM" = 1 ] && [ -n "$TPM_LINE" ]; then
+        # Above the TPM run line, so the options exist when sentinel.tmux is loaded by TPM.
+        TMP=$(mktemp)
+        awk -v n="$TPM_LINE" -v blk="$BLOCK" \
+            'NR == n { while ((getline l < blk) > 0) print l } { print }' "$TMUX_CONF" > "$TMP"
+        replace_conf "$TMP"
+        info "Added to $TMUX_CONF, above the TPM run line"
+    else
+        cat "$BLOCK" >> "$TMUX_CONF"
+        info "Added to $TMUX_CONF"
+        if [ "$IS_TPM" = 1 ]; then
+            warn "No TPM run line found in $TMUX_CONF — check the status lines load before tpm"
+        fi
+    fi
+    rm -f "$BLOCK"
+else
+    warn "Skipped — add #{sentinel_status} to your status-right when you want it"
+fi
+
+if [ "$IS_TPM" = 1 ]; then
     info "TPM plugin entry found — tmux config is handled by sentinel.tmux"
-elif grep -qF "sentinel.tmux" "$TMUX_CONF" 2>/dev/null; then
+elif conf_has "$RUN_RE"; then
     info "sentinel.tmux already sourced from $TMUX_CONF"
 else
     echo "  tmux-sentinel's tmux config (keybinds, status bar, hooks) lives in"
     echo "  sentinel.tmux. Add it to $TMUX_CONF so it loads on every tmux start?"
-    echo -n "  Add it? [Y/n] "
-    read -r answer
-    if [ "${answer:-Y}" != "n" ] && [ "${answer:-Y}" != "N" ]; then
-        # Appended last so it runs after any plugin manager: an unindexed set-hook in
-        # another plugin resets the whole hook array for that event, and whoever runs
-        # last wins.
+    if ask_yes "  Add it? [Y/n] "; then
+        # Appended last, after the status-right lines above, because sentinel.tmux
+        # substitutes the placeholder when it loads. It also runs after any plugin manager:
+        # an unindexed set-hook in another plugin resets the whole hook array for that
+        # event, and whoever runs last wins.
+        backup_conf
         {
             echo ""
             echo "$MARKER: loads keybinds, status bar and visit-tracking hooks."
-            echo "# Keep this after any plugin manager (e.g. TPM's run script) — see"
-            echo "# the hook-ordering note in the project README."
+            echo "# Keep this after any plugin manager (e.g. TPM's run script) and after"
+            echo "# status-right — see the project README."
             echo "$PLUGIN_LINE"
         } >> "$TMUX_CONF"
         info "Added to $TMUX_CONF"
@@ -371,43 +455,36 @@ else
     fi
 fi
 
+# sentinel.tmux must load after status-right is set. Non-TPM: the run-shell line must be
+# the last sentinel line. TPM: status-right must come before the TPM run line.
+if [ "$IS_TPM" = 1 ]; then
+    RUN_LINE=$(conf_line "$TPM_RUN_RE" head)
+else
+    RUN_LINE=$(conf_line "$RUN_RE" head)
+fi
+LAST_STATUS=$(conf_line "$STATUS_RE" tail)
+if [ -n "$RUN_LINE" ] && [ -n "$LAST_STATUS" ] && [ "$LAST_STATUS" -gt "$RUN_LINE" ]; then
+    if [ "$IS_TPM" = 1 ]; then
+        warn "A status bar setting in $TMUX_CONF comes after the TPM run line — move it above that line"
+    else
+        warn "The sentinel.tmux line in $TMUX_CONF comes before a status bar setting — it must load last"
+        if ask_yes "  Move the run-shell line to the end of $TMUX_CONF? [Y/n] "; then
+            backup_conf
+            TMP=$(mktemp)
+            awk -v n="$RUN_LINE" 'NR == n { moved = $0; next } { print } END { print moved }' \
+                "$TMUX_CONF" > "$TMP"
+            replace_conf "$TMP"
+            info "Moved the run-shell line to the end of $TMUX_CONF"
+        else
+            warn "Left in place — the status bar will not show the summary until it is moved"
+        fi
+    fi
+fi
+
 # Load it now so this session is configured without needing a restart.
 tmux run-shell "$REPO_DIR/sentinel.tmux" 2>/dev/null \
     && info "Loaded into the running tmux server" \
     || warn "Could not load into the running server (is tmux running?)"
-
-# status-right: offered, never imposed. sentinel.tmux only ever *substitutes* a
-# #{sentinel_status} placeholder, so without one the status bar shows nothing — which
-# looks like a broken install. Rather than overwrite whatever the user has built (the
-# old behaviour), offer to append the placeholder and let them move it later.
-# Only used to detect an existing segment; the value itself is never copied.
-CURRENT_SR="$(tmux show-option -gqv status-right 2>/dev/null || true)"
-case "$CURRENT_SR" in
-    *sentinel_status*|*status_client.sh*)
-        info "status-right already shows the agent summary"
-        ;;
-    *)
-        echo "  The status bar can show a summary of agents needing attention."
-        echo "  This appends #{sentinel_status} to your status-right; you can move it later."
-        echo -n "  Add it? [Y/n] "
-        read -r answer
-        if [ "${answer:-Y}" != "n" ] && [ "${answer:-Y}" != "N" ]; then
-            # `set -ga` appends to whatever status-right holds at that point, rather
-            # than snapshotting today's value into the conf — a snapshot would go stale
-            # the moment the user edited their own status-right line.
-            {
-                echo ""
-                echo "$MARKER: agent summary. Move #{sentinel_status} wherever you like;"
-                echo "# sentinel.tmux substitutes it for the real command on load."
-                echo "set -ga status-right ' #{sentinel_status}'"
-            } >> "$TMUX_CONF"
-            tmux set -ga status-right " #($REPO_DIR/bin/status_client.sh '#{pane_id}')" 2>/dev/null || true
-            info "Added to $TMUX_CONF and applied to this session"
-        else
-            warn "Skipped — add #{sentinel_status} to your status-right when you want it"
-        fi
-        ;;
-esac
 
 step "Setup complete!"
 echo ""
