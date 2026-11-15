@@ -219,6 +219,72 @@ def test_opencode_pane_is_found_and_typed():
     assert get_agent_types({"p1": "200"}, process_tree=tree) == {"p1": "opencode"}
 
 
+# --- Agent as the pane's root process ---
+#
+# `tmux new-window claude --continue` makes the agent the pane_pid itself, with no shell
+# above it. The root entry must be checked, not only its descendants.
+
+def test_claude_as_pane_root_is_found_and_typed():
+    from tmux_sentinel.process import get_agent_types, _agent_type_for
+    tree = _make_tree(("100", "1", "tmux"),
+                      ("200", "100", "claude --continue --fork-session"))
+    assert _has_agent_descendant("200", tree) is True
+    assert get_agent_panes({"p1": "200"}, process_tree=tree) == {"p1"}
+    assert _agent_type_for("200", tree) == "claude"
+    assert get_agent_types({"p1": "200"}, process_tree=tree) == {"p1": "claude"}
+
+
+def test_claude_absolute_path_as_pane_root_is_found_and_typed():
+    from tmux_sentinel.process import get_agent_types, _agent_type_for
+    tree = _make_tree(("100", "1", "tmux"),
+                      ("200", "100", "/usr/local/bin/claude"))
+    assert _has_agent_descendant("200", tree) is True
+    assert get_agent_panes({"p1": "200"}, process_tree=tree) == {"p1"}
+    assert _agent_type_for("200", tree) == "claude"
+    assert get_agent_types({"p1": "200"}, process_tree=tree) == {"p1": "claude"}
+
+
+def test_kiro_as_pane_root_is_found_and_typed():
+    from tmux_sentinel.process import get_agent_types, _agent_type_for
+    tree = _make_tree(("100", "1", "tmux"),
+                      ("200", "100", "kiro-cli chat"))
+    assert _has_agent_descendant("200", tree) is True
+    assert get_agent_panes({"p1": "200"}, process_tree=tree) == {"p1"}
+    assert _agent_type_for("200", tree) == "kiro"
+    assert get_agent_types({"p1": "200"}, process_tree=tree) == {"p1": "kiro"}
+
+
+def test_opencode_as_pane_root_is_found_and_typed():
+    from tmux_sentinel.process import get_agent_types, _agent_type_for
+    tree = _make_tree(("100", "1", "tmux"),
+                      ("200", "100", "opencode"))
+    assert _has_agent_descendant("200", tree) is True
+    assert get_agent_panes({"p1": "200"}, process_tree=tree) == {"p1"}
+    assert _agent_type_for("200", tree) == "opencode"
+    assert get_agent_types({"p1": "200"}, process_tree=tree) == {"p1": "opencode"}
+
+
+def test_plain_shell_root_without_agent_is_not_found():
+    from tmux_sentinel.process import get_agent_types, _agent_type_for
+    tree = _make_tree(("100", "1", "tmux"),
+                      ("200", "100", "zsh"),
+                      ("300", "200", "vim"))
+    assert _has_agent_descendant("200", tree) is False
+    assert get_agent_panes({"p1": "200"}, process_tree=tree) == set()
+    assert _agent_type_for("200", tree) is None
+    assert get_agent_types({"p1": "200"}, process_tree=tree) == {}
+
+
+def test_editor_root_with_claude_filename_is_not_found():
+    from tmux_sentinel.process import get_agent_types, _agent_type_for
+    tree = _make_tree(("100", "1", "tmux"),
+                      ("200", "100", "vim claude.md"))
+    assert _has_agent_descendant("200", tree) is False
+    assert get_agent_panes({"p1": "200"}, process_tree=tree) == set()
+    assert _agent_type_for("200", tree) is None
+    assert get_agent_types({"p1": "200"}, process_tree=tree) == {}
+
+
 if __name__ == "__main__":
     for name, func in list(globals().items()):
         if name.startswith("test_") and callable(func):

@@ -2,8 +2,9 @@
 Process tree inspection for tmux-sentinel.
 
 Detects which tmux panes have an interactive AI agent (Kiro CLI or Claude Code)
-running as a descendant process. Uses a single `ps -eo pid,ppid,args` call to
-build a process tree, then walks descendants from each pane's shell PID.
+running as the pane's root process or as a descendant of it. Uses a single
+`ps -eo pid,ppid,args` call to build a process tree, then checks each pane's
+pane_pid (the root) and walks its descendants.
 
 Kiro CLI matching: command line must contain both 'kiro-cli' and 'chat'.
 This distinguishes interactive agents from non-interactive uses like
@@ -124,7 +125,14 @@ def _is_agent_process(args: str) -> bool:
 
 
 def _has_agent_descendant(root_pid: str, tree: dict[str, tuple[str, str]]) -> bool:
-    """Walk the process tree from root_pid, return True if any descendant is an interactive AI agent."""
+    """Return True if root_pid or any of its descendants is an interactive AI agent.
+
+    The root counts: a pane started as `claude --continue` has the agent as its pane_pid.
+    """
+    root_entry = tree.get(root_pid)
+    if root_entry and _is_agent_process(root_entry[1]):
+        return True
+
     # Build children map for efficient traversal
     children: dict[str, list[str]] = {}
     for pid, (ppid, _) in tree.items():
@@ -151,7 +159,7 @@ def get_agent_panes(
     process_tree: Optional[dict[str, tuple[str, str]]] = None,
 ) -> set[str]:
     """
-    Return the set of pane IDs that have an AI agent running as a descendant.
+    Return the set of pane IDs that have an AI agent running as the pane's root or a descendant.
 
     Detects Kiro CLI (kiro-cli chat), Claude Code (/path/to/claude) and OpenCode.
 
@@ -169,7 +177,13 @@ def get_agent_panes(
 
 
 def _agent_type_for(root_pid: str, tree: dict[str, tuple[str, str]]) -> Optional[str]:
-    """Return the agent type running under root_pid, or None."""
+    """Return the agent type running as root_pid or under it, or None."""
+    root_entry = tree.get(root_pid)
+    if root_entry:
+        root_type = _agent_type_of(root_entry[1])
+        if root_type:
+            return root_type
+
     children: dict[str, list[str]] = {}
     for pid, (ppid, _) in tree.items():
         children.setdefault(ppid, []).append(pid)
