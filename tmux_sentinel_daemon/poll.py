@@ -93,6 +93,9 @@ def _detect_pane_state(pane_id: str, agent_type: str = "claude") -> str | None:
 # running. The last two show only *background work* (agents, shells) running behind an
 # otherwise idle prompt. The distinction decides whether a result is still waiting to be
 # looked at, so it matters; see the promotion in run_poll.
+#
+# The status line "Waiting for N background agents to finish" is background-only evidence
+# too. Its agent row may have no duration, so the row patterns can miss it.
 _TURN_MARKER = re.compile(
     r"^[ \t]*\S[ \t]+\w+…[ \t]*\(\d"
     r"|esc to interrupt",
@@ -100,7 +103,8 @@ _TURN_MARKER = re.compile(
 )
 _BACKGROUND_MARKER = re.compile(
     r"^[ \t]*(?:❯[ \t]+)?[◯⏺][ \t]+\S+[ \t]{2,}.*?\b\d+[hms]\b[ \t]*(?:·|$)"
-    r"|^[^\n]*·[ \t]*\d+[ \t]+shells?[ \t]*(?:·|$)",
+    r"|^[^\n]*·[ \t]*\d+[ \t]+shells?[ \t]*(?:·|$)"
+    r"|^[ \t]*(?:\S[ \t]+)?Waiting for \d+ background (?:agent|shell|task|process|job)s? to finish",
     re.MULTILINE,
 )
 _WORKING_MARKER = re.compile(

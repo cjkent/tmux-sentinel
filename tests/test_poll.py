@@ -67,6 +67,47 @@ def test_marker_rejects_transcript_lines_with_durations():
     assert not _has_working_marker("  ⏺ main")
 
 
+_BG_STATUS_SCREEN = """\
+✻ Waiting for 1 background agent to finish
+❯ /remote-control
+  /remote-control is active · Continue here, on your phone, or at https://claude.ai/code/session_abc
+────────────────
+❯
+────────────────
+  Sonnet 5.5 (1M context) | Context: 15%
+  ⏵⏵ auto mode on (shift+tab to cycle) · ← 1 agent
+  ⏺ main
+  ◯ bungalow_porch (+1)  Reviewing the bungalow researcher's report"""
+
+
+def test_marker_detects_waiting_for_background_agents_status():
+    # The status line is the only background evidence on this screen: the agent row has
+    # no duration, so the row patterns miss it. It is background-only, so the turn half
+    # must stay false or the result would be treated as a new main turn.
+    from tmux_sentinel_daemon.poll import _has_turn_marker
+    assert _has_working_marker(_BG_STATUS_SCREEN)
+    assert not _has_turn_marker(_BG_STATUS_SCREEN)
+
+
+def test_marker_detects_waiting_for_background_agents_line_alone():
+    # A spinner glyph before the status line is optional and must not be required.
+    from tmux_sentinel_daemon.poll import _has_turn_marker
+    assert _has_working_marker("✻ Waiting for 2 background agents to finish")
+    assert _has_working_marker("Waiting for 1 background shell to finish")
+    assert not _has_turn_marker("✻ Waiting for 2 background agents to finish")
+
+
+def test_marker_rejects_idle_footer_with_shortcuts_hint():
+    # An idle prompt with the "? for shortcuts" hint and no background work must read idle.
+    assert not _has_working_marker("❯ \n  ? for shortcuts")
+
+
+def test_marker_rejects_waiting_phrase_in_prose():
+    # The status pattern is anchored to the line start, so the phrase inside a sentence
+    # (say, the agent describing its own state) must not read as working.
+    assert not _has_working_marker("I will be Waiting for 1 background agent to finish later")
+
+
 # Browsing the agent list swaps the usual mode footer for this one.
 _LIST_VIEW = "  Opus 5 | Context: 8%\n  ↑/↓ to select · Enter to view\n\n"
 
