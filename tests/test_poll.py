@@ -160,6 +160,56 @@ def test_poll_leaves_pane_idle_when_background_agent_finished():
     assert state.get("7").status == IDLE
 
 
+# --- the status line with no duration on the agent row ---
+#
+# The agent row here has no timer, so only the status line tells the idle rule that a
+# background agent is still running.
+
+_HEDGE_SCREEN = """\
+✻ Waiting for 1 background agent to finish
+────────────────
+❯
+────────────────
+  ⏵⏵ auto mode on (shift+tab to cycle) · ← 1 agent
+  ⏺ main
+  ◯ hedge_clumps (+1)  Reviewing the clump hedges"""
+_HEDGE_FOOTER_ONLY = """\
+────────────────
+❯
+────────────────
+  ⏵⏵ auto mode on (shift+tab to cycle) · ← 1 agent"""
+
+
+def test_status_line_without_duration_vetoes_the_idle_rule():
+    from tmux_sentinel_daemon.manifests import load_all_manifests, classify
+    rules = load_all_manifests()["claude"]
+    assert classify(_HEDGE_SCREEN, rules) is None
+
+
+def test_footer_alone_still_reads_idle_without_status_line():
+    from tmux_sentinel_daemon.manifests import load_all_manifests, classify
+    rules = load_all_manifests()["claude"]
+    assert classify(_HEDGE_FOOTER_ONLY, rules) == IDLE
+
+
+def test_plural_status_line_without_duration_vetoes_the_idle_rule():
+    from tmux_sentinel_daemon.manifests import load_all_manifests, classify
+    rules = load_all_manifests()["claude"]
+    plural = _HEDGE_SCREEN.replace("Waiting for 1 background agent to", "Waiting for 2 background agents to")
+    assert classify(plural, rules) is None
+
+
+def test_poll_keeps_working_pane_showing_background_status_line():
+    # Without the veto the pane would be demoted on every cycle and raise an unseen flag.
+    state = DaemonState()
+    state.ensure("28").status = WORKING
+    _run_poll_with({"28": _HEDGE_SCREEN}, state)
+    _run_poll_with({"28": _HEDGE_SCREEN}, state)
+    ps = state.get("28")
+    assert ps.status == WORKING
+    assert ps.unseen is False
+
+
 # --- background shells ---
 #
 # A command the agent started in the background keeps running after the turn ends. The

@@ -24,7 +24,7 @@ pattern = '''ask a question or describe a task'''
 # only if the agent isn't actively working. CC signals "working" with a running
 # spinner and an elapsed timer in parens — "✽ Working… (3s)", "(57s · ↓ 432
 # tokens)", "(5m 7s · …)" — or the older "esc to interrupt" hint. The parenthesised
-# elapsed timer (\(\d+[ms]) is the reliable marker: it's present for the whole
+# elapsed timer (\(\d+[hms]) is the reliable marker: it's present for the whole
 # turn regardless of spinner verb or whether a token counter has appeared yet,
 # and never shows when idle.
 #
@@ -52,7 +52,13 @@ pattern = '''ask a question or describe a task'''
 # matches anyway, but the hint is not guaranteed to be absent, and a pane with a shell
 # running must never classify as idle. See _WORKING_MARKER in poll.py for why the match is
 # bounded on both sides.
+#
+# The fifth alternative vetoes on the status line "Waiting for N background agents to
+# finish", which Claude Code prints above the footer while background agents run. Its
+# agent row may have no duration, so the row alternatives can miss it, and the idle rule
+# would match. It mirrors the status-line pattern in _BACKGROUND_MARKER in poll.py; keep
+# the two in step.
 [[rule]]
 state = "idle"
 pattern = '''shift\+tab to cycle|\? for shortcuts|manual mode on|to select · Enter to view'''
-exclude = '''esc to interrupt|\(\d+[hms]|^[ \t]*(?:❯[ \t]+)?[◯⏺][ \t]+\S+[ \t]{2,}.*?\b\d+[hms]\b[ \t]*(?:·|$)|^[^\n]*·[ \t]*\d+[ \t]+shells?[ \t]*(?:·|$)'''
+exclude = '''esc to interrupt|\(\d+[hms]|^[ \t]*(?:❯[ \t]+)?[◯⏺][ \t]+\S+[ \t]{2,}.*?\b\d+[hms]\b[ \t]*(?:·|$)|^[^\n]*·[ \t]*\d+[ \t]+shells?[ \t]*(?:·|$)|^[ \t]*(?:\S[ \t]+)?Waiting for \d+ background (?:agent|shell|task|process|job)s? to finish'''
