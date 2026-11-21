@@ -30,7 +30,9 @@ def test_marker_tolerates_leading_whitespace():
 
 _BG_FOOTER = "  ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents\n  ⏺ main\n"
 _BG_RUNNING = _BG_FOOTER + "  ◯ kairos-V123  Analyse this oncall ticket…    1m 3s · ↓ 132.0k tokens"
-# A finished agent's row ends in the literal "idle"; the row itself persists.
+# A finished agent's row ends in the literal "idle"; the row itself persists. Only "idle"
+# means finished: a row with a blank trailing status is read as running, because the same
+# row flips between a timer and nothing while its agent works.
 _BG_FINISHED = _BG_FOOTER + "  ◯ kairos-V123  Analyse this oncall ticket…    idle"
 _BG_FINISHED_BLANK = _BG_FOOTER + "  ◯ kairos-V123  Analyse this oncall ticket…"
 
@@ -47,7 +49,12 @@ def test_marker_rejects_finished_background_agent():
     # The row *persists* after the agent finishes; the trailing elapsed time is
     # replaced by "idle". Keying off the glyph alone would strand the pane on WORKING.
     assert not _has_working_marker(_BG_FINISHED)
-    assert not _has_working_marker(_BG_FINISHED_BLANK)
+
+
+def test_marker_reads_blank_status_row_as_working():
+    # The same row can show no status while its agent runs, so a blank trailing status
+    # counts as working; only the literal "idle" marks a finished agent.
+    assert _has_working_marker(_BG_FINISHED_BLANK)
 
 
 def test_marker_ignores_the_focus_glyph():
@@ -298,6 +305,12 @@ def test_oldest_background_seconds_handles_each_unit_form():
     assert oldest("◯ fork  Task   7m") == 420
 
 
+def test_oldest_background_seconds_reads_a_row_with_a_count_after_the_name():
+    # A "(+N)" between the name and the task text must not stop the row from being read.
+    from tmux_sentinel_daemon.poll import _oldest_background_seconds as oldest
+    assert oldest("  ◯ checks_hang (+1)  Find cloud checks hang cause    3m 4s · ↓ 1k") == 3 * 60 + 4
+
+
 def test_oldest_background_seconds_ignores_finished_agents():
     # A finished row ends in the literal "idle", not a time.
     from tmux_sentinel_daemon.poll import _oldest_background_seconds as oldest
@@ -545,6 +558,96 @@ def test_poll_promotion_sets_timestamp():
     ps.timestamp = 0
     _run_poll_with({"7": "✶ Working… (5s)"}, state)
     assert state.get("7").timestamp > 0
+
+
+# --- the agent panel with a row that has no duration ---
+#
+# A row for a running agent can lack the timer, and can show "(+N)" after its name. The
+# "⏺ main" header above the rows is what identifies the panel, so a bare ◯ row elsewhere
+# on screen must not read as working.
+
+_PANEL_SCREEN = """\
+  Sonnet 5.5 (1M context) | Context: 6%
+  ⏵⏵ auto mode on (shift+tab to cycle) · ← 1 agent
+  ⏺ main
+  ◯ skyscraper_model (+1)  Planning generic_office_tower in recipes_generic.py"""
+_PANEL_TWO_ROWS = """\
+  ⏵⏵ auto mode on (shift+tab to cycle) · ← 2 agents
+  ⏺ main
+  ◯ checks_hang (+1)  Find cloud checks hang cause
+  ◯ researcher        Rewriting mem.py memory-sample script"""
+_PANEL_IDLE = """\
+  Opus 5.5 (1M context) | Context: 8%
+❯
+  ⏵⏵ auto mode on (shift+tab to cycle) · ← 1 agent"""
+
+
+def test_panel_row_without_duration_reads_working():
+    from tmux_sentinel_daemon.manifests import load_all_manifests, classify
+    rules = load_all_manifests()["claude"]
+    assert _has_working_marker(_PANEL_SCREEN)
+    assert classify(_PANEL_SCREEN, rules) != IDLE
+
+
+def test_panel_rows_with_and_without_count_read_working():
+    from tmux_sentinel_daemon.manifests import load_all_manifests, classify
+    rules = load_all_manifests()["claude"]
+    assert _has_working_marker(_PANEL_TWO_ROWS)
+    assert classify(_PANEL_TWO_ROWS, rules) != IDLE
+
+
+def test_panel_footer_without_rows_reads_idle():
+    from tmux_sentinel_daemon.manifests import load_all_manifests, classify
+    rules = load_all_manifests()["claude"]
+    assert not _has_working_marker(_PANEL_IDLE)
+    assert classify(_PANEL_IDLE, rules) == IDLE
+
+
+def test_stray_focus_row_without_panel_header_is_not_working():
+    assert not _has_working_marker("❯\n  ◯ item  text")
+    assert not _has_working_marker("  ⏵⏵ auto mode on · ← 1 agent")
+
+
+def test_panel_row_without_header_is_not_working_after_other_text():
+    assert not _has_working_marker("⏺ Bash(ls)\n  ◯ item  text")
+
+
+def test_working_marker_implies_not_idle_across_corpus():
+    # Every screen the marker calls working must not classify as idle, or poll.py would
+    # demote it on the next cycle.
+    from tmux_sentinel_daemon.manifests import load_all_manifests, classify
+    rules = load_all_manifests()["claude"]
+    corpus = [
+        _PANEL_SCREEN,
+        _PANEL_TWO_ROWS,
+        _PANEL_IDLE,
+        _BG_RUNNING,
+        _BG_FINISHED,
+        _BG_FINISHED_BLANK,
+        _BG_STATUS_SCREEN,
+        _HEDGE_SCREEN,
+        _AGENTS_RUNNING,
+        "❯\n" + _SHELL_FOOTER,
+        "✽ Working… (30s · ↓ 1.2k tokens)",
+        "✻ Crunched for 1m 9s\n❯ \n",
+        "  ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents",
+        "❯\n  ◯ item  text",
+        _LIST_VIEW + "  ⏺ main\n  ◯ kairos  task…    idle",
+        _LIST_VIEW + "  ⏺ main\n  ◯ kairos  task…    1m 3s · ↓ 132k tokens",
+    ]
+    for screen in corpus:
+        if _has_working_marker(screen):
+            assert classify(screen, rules) != IDLE, screen
+
+
+def test_poll_keeps_working_pane_showing_panel_row_without_duration():
+    state = DaemonState()
+    state.ensure("33").status = WORKING
+    _run_poll_with({"33": _PANEL_SCREEN}, state)
+    _run_poll_with({"33": _PANEL_SCREEN}, state)
+    ps = state.get("33")
+    assert ps.status == WORKING
+    assert ps.unseen is False
 
 
 if __name__ == "__main__":

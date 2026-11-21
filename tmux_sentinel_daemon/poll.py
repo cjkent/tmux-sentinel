@@ -104,7 +104,12 @@ _TURN_MARKER = re.compile(
 _BACKGROUND_MARKER = re.compile(
     r"^[ \t]*(?:❯[ \t]+)?[◯⏺][ \t]+\S+[ \t]{2,}.*?\b\d+[hms]\b[ \t]*(?:·|$)"
     r"|^[^\n]*·[ \t]*\d+[ \t]+shells?[ \t]*(?:·|$)"
-    r"|^[ \t]*(?:\S[ \t]+)?Waiting for \d+ background (?:agent|shell|task|process|job)s? to finish",
+    r"|^[ \t]*(?:\S[ \t]+)?Waiting for \d+ background (?:agent|shell|task|process|job)s? to finish"
+    # The agent panel's own header ("⏺ main") with an agent row under it whose timer is
+    # missing or shows "(+N)" after the name. Only a row ending in "idle" is finished; a
+    # blank trailing status is read as running.
+    r"|^[ \t]*⏺[ \t]+main[ \t]*\n(?:[ \t]*\n|[ \t]*(?:❯[ \t]+)?◯[^\n]*\n)*"
+    r"[ \t]*(?:❯[ \t]+)?◯[ \t]+\S+(?:[ \t]+\(\+\d+\))?(?![^\n]*[ \t]{2,}idle[ \t]*$)[ \t]{2,}\S",
     re.MULTILINE,
 )
 _WORKING_MARKER = re.compile(
@@ -130,7 +135,7 @@ _WORKING_MARKER = re.compile(
 # the line, which is what keeps a number inside the task text from being read as the timer.
 # The (?=\d) stops the all-optional group from matching empty.
 _BG_ROW_TIMER = re.compile(
-    r"^[ \t]*(?:❯[ \t]+)?[◯⏺][ \t]+\S+[ \t]{2,}.*?[ \t](?=\d)"
+    r"^[ \t]*(?:❯[ \t]+)?[◯⏺][ \t]+\S+(?:[ \t]+\(\+\d+\))?[ \t]{2,}.*?[ \t](?=\d)"
     r"(?:(\d+)h[ \t]*)?(?:(\d+)m[ \t]*)?(?:(\d+)s)?[ \t]*(?:·|$)",
     re.MULTILINE,
 )

@@ -34,8 +34,10 @@ pattern = '''ask a question or describe a task'''
 # veto the pane classifies as idle, and since poll.py demotes a WORKING pane whenever
 # the scrape says idle, it would flip-flop and raise a spurious unseen flag each time.
 #
-# A running row ends in an elapsed time; a finished one ends in the literal "idle" (or
-# nothing). The row persists either way, so that trailing status is the only signal.
+# A running row ends in an elapsed time; a finished one ends in the literal "idle". Only
+# "idle" means finished: a blank trailing status is read as running, because the same row
+# flips between a timer and nothing while its agent works. The row persists either way,
+# so that trailing status is the only signal.
 # Not keyed to the ◯/⏺ glyph: those mark which entry is focused in the list, not which
 # agent is running, and they swap as you move between agents. The "❯ " prefix is
 # optional because it's a transient navigation cursor — present only while the user is
@@ -61,4 +63,4 @@ pattern = '''ask a question or describe a task'''
 [[rule]]
 state = "idle"
 pattern = '''shift\+tab to cycle|\? for shortcuts|manual mode on|to select · Enter to view'''
-exclude = '''esc to interrupt|\(\d+[hms]|^[ \t]*(?:❯[ \t]+)?[◯⏺][ \t]+\S+[ \t]{2,}.*?\b\d+[hms]\b[ \t]*(?:·|$)|^[^\n]*·[ \t]*\d+[ \t]+shells?[ \t]*(?:·|$)|^[ \t]*(?:\S[ \t]+)?Waiting for \d+ background (?:agent|shell|task|process|job)s? to finish'''
+exclude = '''esc to interrupt|\(\d+[hms]|^[ \t]*(?:❯[ \t]+)?[◯⏺][ \t]+\S+[ \t]{2,}.*?\b\d+[hms]\b[ \t]*(?:·|$)|^[^\n]*·[ \t]*\d+[ \t]+shells?[ \t]*(?:·|$)|^[ \t]*(?:\S[ \t]+)?Waiting for \d+ background (?:agent|shell|task|process|job)s? to finish|^[ \t]*⏺[ \t]+main[ \t]*\n(?:[ \t]*\n|[ \t]*(?:❯[ \t]+)?◯[^\n]*\n)*[ \t]*(?:❯[ \t]+)?◯[ \t]+\S+(?:[ \t]+\(\+\d+\))?(?![^\n]*[ \t]{2,}idle[ \t]*$)[ \t]{2,}\S'''
